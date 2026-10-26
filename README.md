@@ -15,12 +15,20 @@ Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch n
    ```
 
 4. Vor dem ersten Start einmal **Strg+Umschalt+B** drücken. Die Standardaufgabe **Scan2Mesh: Umgebung vorbereiten** legt mit `uv sync --frozen` die Python-Umgebung an und installiert die festgelegten Abhängigkeiten. Warten, bis sie erfolgreich abgeschlossen ist.
-5. **F5** drücken. Die Standardkonfiguration **Scan2Mesh: Demo** verarbeitet eine synthetische Industrieszene. Vor jedem Start werden die Abhängigkeiten automatisch mit `uv sync --frozen` geprüft.
-6. Für eigene Daten unter **Ausführen und Debuggen** die Konfiguration **Scan2Mesh: Eigener Scan** auswählen und F5 drücken. Den Dateipfad ohne umgebende Anführungszeichen eingeben; absolute Pfade und Pfade relativ zum Repository sind möglich. Anschließend die Einheit der Eingabekoordinaten wählen: `m` oder `mm`. Für einen üblichen E57-Export in Metern `m` wählen.
+5. **`main.py` öffnen und oben rechts auf ▶ „Python-Datei ausführen“ klicken.** Alternativ startet **F5** die Standardkonfiguration **Scan2Mesh: Eigener Scan**.
+6. Im Windows-Dateiauswahldialog die Punktwolke auswählen. Anschließend beginnt die Verarbeitung automatisch. **Abbrechen** schließt die Auswahl ohne Verarbeitung.
 
-Jeder Start schreibt in einen neuen Ordner; die Demo beispielsweise nach `runs/vscode-demo-<eindeutige Kennung>/result`. Der tatsächliche Pfad wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen; eine eigene grafische Oberfläche ist noch nicht enthalten.
+Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Der tatsächliche Pfad wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen.
 
-Bei eigenen Scans setzt dieser Schnellstart Voxelgröße und Ebenentoleranz auf einen Zentimeter in der gewählten Eingabeeinheit. Das ist ein Ausgangspunkt und muss für feine Bauteile gegebenenfalls angepasst werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
+Der einfache Start geht von **Koordinaten in Metern** aus, wie bei einem üblichen E57-Export. Einheiten werden nicht automatisch erkannt. Voxelgröße und Ebenentoleranz sind zunächst auf einen Zentimeter eingestellt. Für eine Punktwolke mit Millimeterkoordinaten im Terminal stattdessen starten:
+
+```powershell
+uv run python main.py --units mm
+```
+
+Auch dabei öffnet sich die Dateiauswahl; die Verarbeitungsschwellen werden an Millimeterkoordinaten angepasst. Für feine Bauteile müssen diese Ausgangswerte gegebenenfalls weiter angepasst werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
+
+Die alternative Startkonfiguration **Scan2Mesh: Demo** erzeugt und verarbeitet eine synthetische Industrieszene. Sie lässt sich auch mit `uv run python main.py --demo` starten. Ohne Dateiauswahl ist ein Start mit `uv run python main.py --input "C:\Scans\halle.e57"` möglich.
 
 ## Im Terminal starten
 

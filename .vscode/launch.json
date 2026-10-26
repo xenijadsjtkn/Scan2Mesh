@@ -2,32 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Scan2Mesh: Demo",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/run_in_vscode.py",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "windows": {
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
-      },
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "preLaunchTask": "Scan2Mesh: Umgebung vorbereiten",
-      "env": {
-        "OMP_NUM_THREADS": "4"
-      },
-      "justMyCode": true
-    },
-    {
       "name": "Scan2Mesh: Eigener Scan",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/scripts/run_in_vscode.py",
+      "program": "${workspaceFolder}/main.py",
       "python": "${workspaceFolder}/.venv/bin/python",
       "windows": {
         "python": "${workspaceFolder}/.venv/Scripts/python.exe"
       },
-      "args": ["--input", "${input:scanPath}", "--units", "${input:coordinateUnits}"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "preLaunchTask": "Scan2Mesh: Umgebung vorbereiten",
@@ -35,21 +17,26 @@
         "OMP_NUM_THREADS": "4"
       },
       "justMyCode": true
-    }
-  ],
-  "inputs": [
-    {
-      "id": "scanPath",
-      "type": "promptString",
-      "description": "Scan-Dateipfad, relativ zum Projekt oder absolut (ohne Anfuehrungszeichen)",
-      "default": "data/besprechungsraum.e57"
     },
     {
-      "id": "coordinateUnits",
-      "type": "pickString",
-      "description": "Einheit der Eingabekoordinaten: m = Meter, mm = Millimeter",
-      "options": ["m", "mm"],
-      "default": "m"
+      "name": "Scan2Mesh: Demo",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Scan2Mesh: Umgebung vorbereiten",
+      "env": {
+        "OMP_NUM_THREADS": "4"
+      },
+      "justMyCode": true,
+      "args": [
+        "--demo"
+      ]
     }
   ]
 }

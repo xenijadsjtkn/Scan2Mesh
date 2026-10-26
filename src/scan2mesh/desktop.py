@@ -1,0 +1,131 @@
+"""Local desktop entry point: choose a scan, then process it."""
+
+import argparse
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+RUNS_ROOT = Path(__file__).resolve().parents[2] / "runs"
+
+# Fixed command: selected paths return as UTF-8 data, never as shell source.
+_WINDOWS_PICKER = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Scan auswaehlen'
+$dialog.Filter = 'Punktwolken (*.e57;*.ply;*.pcd;*.xyz;*.xyzn;*.xyzrgb;*.pts)|*.e57;*.ply;*.pcd;*.xyz;*.xyzn;*.xyzrgb;*.pts|Alle Dateien (*.*)|*.*'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.Opacity = 0
+try {
+    $owner.Show()
+    if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+        [Console]::WriteLine($dialog.FileName)
+    }
+} finally {
+    $dialog.Dispose()
+    $owner.Close()
+    $owner.Dispose()
+}
+"""
+
+
+def _pick_windows_scan() -> Path | None:
+    try:
+        completed = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-STA", "-Command", _WINDOWS_PICKER],
+            check=True, capture_output=True, text=True, encoding="utf-8",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        raise RuntimeError(f"Windows-Dateiauswahl konnte nicht geoeffnet werden: {detail}") from exc
+    selected = completed.stdout.rstrip("\r\n")
+    return Path(selected) if selected else None
+
+
+def _pick_tk_scan() -> Path | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as exc:
+        raise RuntimeError("Die Dateiauswahl benoetigt Tk auf diesem System. Alternativ --input DATEI verwenden.") from exc
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        raise RuntimeError("Die Dateiauswahl benoetigt einen lokalen Desktop. Alternativ --input DATEI verwenden.") from exc
+    try:
+        root.withdraw()
+        selected = filedialog.askopenfilename(
+            parent=root, title="Scan auswählen",
+            filetypes=[("Punktwolken", "*.e57 *.ply *.pcd *.xyz *.xyzn *.xyzrgb *.pts"), ("Alle Dateien", "*")],
+        )
+        return Path(selected) if selected else None
+    finally:
+        root.destroy()
+
+
+def choose_scan_file() -> Path | None:
+    return _pick_windows_scan() if sys.platform == "win32" else _pick_tk_scan()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Datei auswaehlen und mit Scan2Mesh verarbeiten")
+    source_args = parser.add_mutually_exclusive_group()
+    source_args.add_argument("--input", type=Path, help="Datei direkt verarbeiten, ohne Auswahldialog")
+    source_args.add_argument("--demo", action="store_true", help="Synthetische Demo statt eigener Datei")
+    parser.add_argument("--units", choices=["m", "mm"], default="m", help="Eingabekoordinaten; Standard: Meter")
+    args = parser.parse_args(argv)
+    if args.demo and args.units != "m":
+        parser.error("Die synthetische Demo verwendet Meter.")
+    source = args.input
+    if source is None and not args.demo:
+        print("Scan-Datei im Auswahldialog oeffnen ...", flush=True)
+        try:
+            source = choose_scan_file()
+        except RuntimeError as exc:
+            parser.exit(2, f"Scan2Mesh: {exc}\n")
+        if source is None:
+            print("Abgebrochen. Es wurde keine Datei verarbeitet.")
+            return None
+    if source is not None:
+        source = Path(source).resolve()
+        if not source.is_file():
+            parser.error(f"Scan-Datei nicht gefunden: {source}")
+
+    # Cancelling must not initialize reconstruction or create output folders.
+    from .demo import generate_demo
+    from .pipeline import PipelineConfig, run_pipeline
+
+    RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+    run_dir = Path(tempfile.mkdtemp(prefix="vscode-demo-" if args.demo else "vscode-scan-", dir=RUNS_ROOT))
+    if args.demo:
+        source = run_dir / "demo.ply"
+        generate_demo(source)
+        config = PipelineConfig(voxel_size=0.025, plane_distance=0.015)
+    else:
+        scale = 1 if args.units == "m" else 1_000
+        config = PipelineConfig(voxel_size=0.01 * scale, plane_distance=0.01 * scale)
+    result = run_dir / "result"
+    print(f"Eingabe: {source}", flush=True)
+    print(f"Ausgabe: {result}", flush=True)
+    print(f"Koordinateneinheit: {args.units}; Voxelgroesse: {config.voxel_size}", flush=True)
+    print("Verarbeitung laeuft ...", flush=True)
+    try:
+        report = run_pipeline(source, result, config)
+    except (ValueError, OSError, RuntimeError) as exc:
+        parser.exit(2, f"Scan2Mesh: {exc}\n")
+    print(f"Fertig: {report['counts']['mesh_triangles']} Dreiecke")
+    print(f"Mesh: {result / 'mesh.ply'}")
+    print(f"Qualitaetsbericht: {result / 'report.json'}")
+    print("Das Mesh laesst sich in CloudCompare oder MeshLab oeffnen.")
+    return result
+
+
+if __name__ == "__main__":
+    main()
