@@ -23,6 +23,7 @@ def main(argv=None):
     process.add_argument("--normal-radius", type=float, help="Input units; default derives from median point spacing")
     process.add_argument("--ball-radius", type=float, help="Override multiscale radii with r and 2r, in input units")
     process.add_argument("--reconstruction", choices=["ball-pivoting", "poisson"], default="ball-pivoting")
+    process.add_argument("--surface-mode", choices=["global", "segmented"], default="global", help="Segmented preview meshes connected planar patches separately")
     process.add_argument("--poisson-depth", type=int, default=8)
     process.add_argument("--crop", type=float, nargs=6, metavar=("XMIN", "YMIN", "ZMIN", "XMAX", "YMAX", "ZMAX"), help="Region in original source coordinates")
     process.add_argument("--seed", type=int, default=7)

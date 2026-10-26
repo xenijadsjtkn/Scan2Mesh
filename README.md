@@ -40,6 +40,8 @@ Auch dabei öffnet sich die Dateiauswahl; die Verarbeitungsschwellen werden an M
 
 Die alternative Startkonfiguration **Scan2Mesh: Demo** erzeugt und verarbeitet eine synthetische Industrieszene. Sie lässt sich auch mit `uv run python main.py --demo` starten. Ohne Dateiauswahl ist ein Start mit `uv run python main.py --input "C:\Scans\halle.e57"` möglich.
 
+Für die Vorschau der getrennten Flächenverarbeitung unter **Ausführen und Debuggen** die Konfiguration **Scan2Mesh: Segmentierte Rekonstruktion (Vorschau)** wählen und F5 drücken. Es öffnet sich dieselbe Dateiauswahl. Die Vorschau lässt sich auch mit `uv run python main.py --surface-mode segmented` starten. Der normale Play-Start verwendet weiterhin den globalen Modus.
+
 ## Im Terminal starten
 
 Im Repository-Verzeichnis mit Python 3.12 und [uv](https://docs.astral.sh/uv/):
@@ -64,6 +66,16 @@ Für einen Vergleich mit Poisson-Rekonstruktion einen anderen Ausgabeordner verw
 ```bash
 uv run scan2mesh process data/demo.ply --output runs/demo-poisson --voxel-size 0.025 --plane-distance 0.015 --reconstruction poisson --poisson-depth 8
 ```
+
+## Segmentierte Rekonstruktion (Vorschau)
+
+Mit `--surface-mode segmented` werden zusammenhängende ebene Bereiche geometrisch erkannt und getrennt vermesht. Die Triangulation orientiert sich an der tatsächlich beobachteten Punktunterstützung, um insbesondere größere ungemessene Bereiche nicht pauschal zu überspannen. Restpunkte bleiben als `unknown` erkennbar und werden separat rekonstruiert. Dieser Modus verwendet kein vortrainiertes Modell und weist keine semantischen Klassen wie „Wand“, „Rohr“ oder „Maschine“ zu.
+
+```bash
+uv run scan2mesh process /pfad/zum/ausschnitt.ply --output runs/segmentiert --surface-mode segmented --voxel-size 0.01 --plane-distance 0.01
+```
+
+Punktdichte und Verarbeitungsschwellen begrenzen auch hier den Detailerhalt. Kleine Öffnungen können überbrückt werden; der Modus garantiert nicht die Erhaltung aller Löcher. Die globale Rekonstruktion bleibt der Standard (`--surface-mode global`) und dient als Vergleich. Ein Nachweis besserer Genauigkeit an einem realen Baustellenscan steht noch aus.
 
 ## Eigene Scans
 
@@ -93,9 +105,14 @@ Die Quelldatei bleibt unverändert. Als Ausgabe einen neuen oder leeren Ordner v
 | Datei | Inhalt |
 | --- | --- |
 | `cleaned.ply` | Bereinigte Punktwolke als Grundlage für die Rekonstruktion |
-| `segments.ply` | Punktwolke mit farbig markierten erkannten Ebenen |
+| `segments.ply` | Punktwolke mit farbig markierten Ebenen; im segmentierten Modus getrennte ebene Bereiche und unbekannte Restpunkte |
 | `mesh.ply` | Rekonstruiertes Dreiecksmesh |
-| `report.json` | Parameter, Punkt- und Meshanzahlen, Ebenenmodelle, Abstände und Topologiekennzahlen |
+| `report.json` | Parameter, Punkt- und Meshanzahlen, Ebenenmodelle, Abstände und Topologiekennzahlen; im segmentierten Modus zusätzlich Segmentierungsangaben |
+| `segmentation.npz` | Nur im segmentierten Modus: ganzzahlige `patch_ids` in derselben Punktreihenfolge wie `cleaned.ply` |
+
+Im segmentierten Modus enthält `segmentation.npz` die `int32`-Zuordnungen `patch_ids`; `-1` steht für `unknown`. Sie beziehen sich auf die Punkte **nach Bereinigung und Voxelreduktion**, nicht auf die Originalpunktreihenfolge des Scans. Die IDs bezeichnen geometrische Bereiche und keine erkannten realen Objekte.
+
+Unter `segmentation` dokumentiert `report.json` die Anzahl der Bereiche (`patch_count`), zugeordnete Ebenenpunkte (`planar_points`), unbekannte Punkte (`unknown_points`) und Angaben zu jedem Bereich. `kind` ist `geometric`; `semantic_model` und die `semantic_class` der Bereiche sind `null`. Objektklassen und Klassifikationswahrscheinlichkeiten werden nicht automatisch erzeugt. `diagnostics` nennt problematische Bereiche. Nicht verwendbare Flächenbereiche fallen auf `unknown` zurück; nicht vermeshte Randpunkte akzeptierter Bereiche werden als `unmeshed_points` ausgewiesen. Diese Punkte bei der Vollständigkeitsprüfung berücksichtigen.
 
 Die PLY-Dateien lassen sich beispielsweise in CloudCompare oder MeshLab öffnen. Originalpunktwolke und Mesh gemeinsam ansehen, besonders an Öffnungen, Kanten, Rohren und dünnen Blechen.
 
@@ -121,9 +138,9 @@ Der Standard verwendet Ball Pivoting. Auch dieses Verfahren kann abhängig von P
 
 ## Nächste Entwicklungsschritte
 
-1. Einen echten Baustellenausschnitt mit bekannten Einheiten und Messabständen als Referenz etablieren; Anforderungen an Laufzeit, Detailerhalt und zulässige Abweichung festlegen.
+1. Die geometrische Aufteilung in zusammenhängende Ebenen ist als Vorschau verfügbar. Als Nächstes an einem echten Baustellenausschnitt Originalpunkte, bereinigte Punkte und beide Meshvarianten vergleichen; Anforderungen an Laufzeit, Detailerhalt und zulässige Abweichung festlegen.
 2. Öffnungen gezielt auswählen, lokale Rekonstruktion und kontrolliertes Lochschließen ergänzen; große Scans in überlappende Bereiche aufteilen.
 3. Zylinder und Rohrabschnitte geometrisch anpassen und gemeinsam mit Ebenen prüfen.
-4. Eine visuelle Auswahl und Korrektur ergänzen; danach passende semantische Modelle für die tatsächlich vorkommenden Objekte prüfen.
+4. Eine visuelle Auswahl und Korrektur ergänzen. Später einen optionalen Linux-/GPU-Adapter für passende Punktwolkenmodelle wie Mask3D oder Pointcept prüfen. Solche Modelle verarbeiten 3D-Punkte und gegebenenfalls Punktfarben; Kamerabilder sind dafür keine generelle Voraussetzung. Passende Klassen und Modellgewichte für Industrieanlagen müssen separat bewertet werden.
 
 Originalpunkte, Einheiten und geometrische Modelle bleiben dabei die Grundlage für eine spätere CAD-Ableitung.

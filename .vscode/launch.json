@@ -37,6 +37,27 @@
       "args": [
         "--demo"
       ]
+    },
+    {
+      "name": "Scan2Mesh: Segmentierte Rekonstruktion (Vorschau)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Scan2Mesh: Umgebung vorbereiten",
+      "env": {
+        "OMP_NUM_THREADS": "4"
+      },
+      "justMyCode": true,
+      "args": [
+        "--surface-mode",
+        "segmented"
+      ]
     }
   ]
 }

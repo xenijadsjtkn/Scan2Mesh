@@ -90,6 +90,7 @@ def main(argv=None):
     source_args.add_argument("--demo", action="store_true", help="Synthetische Demo statt eigener Datei")
     parser.add_argument("--units", choices=["m", "mm"], default="m", help="Eingabekoordinaten; Standard: Meter")
     parser.add_argument("--output-root", type=Path, help="Speicherort fuer neue Ergebnisordner; Windows-Standard: LOCALAPPDATA/Scan2Mesh/runs")
+    parser.add_argument("--surface-mode", choices=["global", "segmented"], default="global", help="Segmentierte Rekonstruktion als geometrische Vorschau")
     args = parser.parse_args(argv)
     if args.demo and args.units != "m":
         parser.error("Die synthetische Demo verwendet Meter.")
@@ -121,15 +122,17 @@ def main(argv=None):
     if args.demo:
         source = run_dir / "demo.ply"
         generate_demo(source)
-        config = PipelineConfig(voxel_size=0.025, plane_distance=0.015)
+        config = PipelineConfig(voxel_size=0.025, plane_distance=0.015, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
     else:
         scale = 1 if args.units == "m" else 1_000
-        config = PipelineConfig(voxel_size=0.01 * scale, plane_distance=0.01 * scale)
+        config = PipelineConfig(voxel_size=0.01 * scale, plane_distance=0.01 * scale, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
     result = run_dir / "result"
     print(f"Eingabe: {source}", flush=True)
     print(f"Ausgabe: {result}", flush=True)
     print(f"Koordinateneinheit: {args.units}; Voxelgroesse: {config.voxel_size}", flush=True)
     print("Verarbeitung laeuft ...", flush=True)
+    if args.surface_mode == "segmented":
+        print("Vorschau: zusammenhaengende Ebenenbereiche, keine semantische Objekterkennung.", flush=True)
     try:
         report = run_pipeline(source, result, config)
     except (ValueError, OSError, RuntimeError) as exc:

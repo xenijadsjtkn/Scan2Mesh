@@ -4,6 +4,7 @@ All lengths are expressed in the input coordinate units. No semantic labels or
 intentional hole filling are inferred here.
 """
 
+import colorsys
 import copy
 import json
 import math
@@ -34,6 +35,7 @@ class PipelineConfig:
     poisson_depth: int = 8
     seed: int = 7
     crop: tuple[float, float, float, float, float, float] | None = None
+    surface_mode: str = "global"
 
     def __post_init__(self):
         if not math.isfinite(self.voxel_size) or self.voxel_size < 0:
@@ -54,6 +56,8 @@ class PipelineConfig:
             raise ValueError("seed must be < 2**31")
         if self.reconstruction not in ("ball-pivoting", "poisson"):
             raise ValueError("reconstruction must be ball-pivoting or poisson")
+        if self.surface_mode not in ("global", "segmented"):
+            raise ValueError("surface_mode must be global or segmented")
         if self.crop is not None:
             if len(self.crop) != 6 or not np.isfinite(self.crop).all():
                 raise ValueError("crop must contain six finite coordinates")
@@ -169,7 +173,7 @@ def _prepare_normals(cloud, radius):
     cloud.normalize_normals()
 
 
-def _reconstruct(cloud, config, nearest_distances):
+def _reconstruct(cloud, config, nearest_distances, *, allow_empty=False):
     density_summary = None
     radii = []
     if config.reconstruction == "ball-pivoting":
@@ -203,9 +207,78 @@ def _reconstruct(cloud, config, nearest_distances):
     mesh.remove_degenerate_triangles()
     mesh.remove_unreferenced_vertices()
     if len(mesh.triangles) == 0:
-        raise ValueError("Reconstruction produced no triangles; check point spacing and normal/ball radius")
-    mesh.compute_vertex_normals()
+        if not allow_empty:
+            raise ValueError("Reconstruction produced no triangles; check point spacing and normal/ball radius")
+    else:
+        mesh.compute_vertex_normals()
     return mesh, radii, density_summary
+
+
+def _reconstruct_segmented(cloud, config, origin):
+    from .segmentation import mesh_planar_patch, segment_planar_patches
+
+    labels, patches = segment_planar_patches(
+        cloud, distance_threshold=config.plane_distance,
+        max_planes=config.max_planes, min_points=config.min_plane_points, seed=config.seed,
+    )
+    accepted_labels = np.full(len(cloud.points), -1, dtype=np.int32)
+    mesh = o3d.geometry.TriangleMesh()
+    descriptions, diagnostics = [], []
+    for patch in patches:
+        patch_mesh = mesh_planar_patch(cloud, patch)
+        if not len(patch_mesh.triangles):
+            diagnostics.append("A candidate planar patch had no supported triangles and remains unclassified.")
+            continue
+        used_points = len(np.unique(np.asarray(patch_mesh.triangles)))
+        patch_id = len(descriptions)
+        accepted_labels[patch.indices] = patch_id
+        descriptions.append({
+            "id": patch_id, "geometric_type": "plane", "semantic_class": None,
+            "normal": np.asarray(patch.normal).tolist(),
+            "offset": float(patch.offset - np.asarray(patch.normal) @ origin),
+            "point_count": int(len(patch.indices)), "rms_distance": float(patch.rms_distance),
+            "spacing": float(patch.spacing), "mesh_triangles": len(patch_mesh.triangles),
+            "unmeshed_points": int(len(patch.indices) - used_points),
+        })
+        # Do not send unsupported boundary points through a second triangulator:
+        # it could fill openings intentionally preserved by the patch mesher.
+        patch_mesh.remove_unreferenced_vertices()
+        mesh += patch_mesh
+
+    unknown = np.flatnonzero(accepted_labels == -1)
+    residual = cloud.select_by_index(unknown.tolist())
+    radii, density_summary = [], None
+    residual_triangles = 0
+    if len(unknown) >= 3:
+        distances = np.asarray(residual.compute_nearest_neighbor_distance())
+        residual_mesh, radii, density_summary = _reconstruct(
+            residual, config, distances, allow_empty=True
+        )
+        residual_triangles = len(residual_mesh.triangles)
+        if residual_triangles:
+            mesh += residual_mesh
+        else:
+            diagnostics.append("Unclassified points produced no reliable triangles; they remain in cleaned.ply and segments.ply.")
+    elif len(unknown):
+        diagnostics.append("Fewer than three unclassified points remain; they are retained as points without triangles.")
+    if not len(mesh.triangles):
+        raise ValueError("Segmented reconstruction produced no supported triangles; inspect point density and tolerances")
+    mesh.compute_vertex_normals()
+    segmented = copy.deepcopy(cloud)
+    segmented.paint_uniform_color([0.55, 0.55, 0.55])
+    colors = np.asarray(segmented.colors)
+    for patch in descriptions:
+        colors[accepted_labels == patch["id"]] = colorsys.hsv_to_rgb((patch["id"] * 0.61803398875) % 1, 0.7, 0.95)
+    metadata = {
+        "kind": "geometric", "mode": "segmented", "semantic_model": None,
+        "patch_count": len(descriptions), "planar_points": int(np.count_nonzero(accepted_labels >= 0)),
+        "unknown_points": int(len(unknown)), "patches": descriptions,
+        "unknown_reconstruction": config.reconstruction, "unknown_mesh_triangles": residual_triangles,
+        "label_file": "segmentation.npz", "label_reference": "cleaned.ply vertex order",
+        "unknown_label": -1, "diagnostics": diagnostics,
+        "note": "Planar region IDs are geometric patches, not semantic objects. Unclassified points use the baseline reconstructor separately. Small openings below the support resolution are not guaranteed to remain open.",
+    }
+    return mesh, segmented, descriptions, metadata, accepted_labels, radii, density_summary
 
 
 def _quality(mesh, cleaned, original, seed):
@@ -291,8 +364,12 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
         raise ValueError("Could not determine positive point spacing")
     normal_radius = config.normal_radius or max(4 * spacing, 2 * config.voxel_size)
     _prepare_normals(cloud, normal_radius)
-    segmented, planes = _segment_planes(cloud, config, origin)
-    mesh, ball_radii, density_summary = _reconstruct(cloud, config, nearest)
+    segmentation_info, patch_ids = None, None
+    if config.surface_mode == "segmented":
+        mesh, segmented, planes, segmentation_info, patch_ids, ball_radii, density_summary = _reconstruct_segmented(cloud, config, origin)
+    else:
+        segmented, planes = _segment_planes(cloud, config, origin)
+        mesh, ball_radii, density_summary = _reconstruct(cloud, config, nearest)
     quality = _quality(mesh, cloud, original, config.seed)
     counts.update(mesh_vertices=len(mesh.vertices), mesh_triangles=len(mesh.triangles))
     report = {
@@ -300,6 +377,7 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
         "open3d_version": o3d.__version__, "input_path": str(input_path),
         "config": json.loads(json.dumps(asdict(config))), "import": import_info,
         "counts": counts, "planes": planes, "quality": quality,
+        "segmentation": segmentation_info,
         "analysis": {
             "coordinate_origin": origin.tolist(), "median_nearest_neighbor_distance": spacing,
             "normal_radius": normal_radius, "ball_radii": ball_radii
@@ -327,6 +405,8 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
         mesh.translate(origin)
         if not o3d.io.write_triangle_mesh(str(staged / "mesh.ply"), mesh):
             raise OSError("Could not write mesh.ply")
+        if patch_ids is not None:
+            np.savez_compressed(staged / "segmentation.npz", patch_ids=patch_ids)
         (staged / "report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
         complete = True
         _publish_staged_results(staged, output_dir)
