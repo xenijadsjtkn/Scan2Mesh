@@ -6,14 +6,30 @@ import sys
 from pathlib import Path
 
 
+def project_environment(root: Path) -> Path:
+    """Keep Windows dependency updates outside synchronized project folders."""
+    if sys.platform == "win32":
+        local_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_data) if local_data else Path.home() / "AppData" / "Local"
+        return base / "Scan2Mesh" / "venv"
+    return Path(root) / ".venv"
+
+
 def main():
     root = Path(__file__).resolve().parent
-    if Path(sys.prefix).resolve() != (root / ".venv").resolve():
+    environment_dir = project_environment(root)
+    if Path(sys.prefix).resolve() != environment_dir.resolve():
         # Play may use a global Python, even with another scan2mesh installed.
-        # Select this checkout's environment before importing application code.
-        python = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        # Select the managed environment before importing application code.
+        # The old checkout-local Windows environment is left untouched.
+        python = environment_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
         environment = os.environ.copy()
-        environment.setdefault("UV_CACHE_DIR", str(root / ".cache" / "uv"))
+        if sys.platform == "win32":
+            environment["UV_PROJECT_ENVIRONMENT"] = str(environment_dir)
+            environment.setdefault("UV_CACHE_DIR", str(environment_dir.parent / "cache" / "uv"))
+            print(f"Windows-Python-Umgebung wird vorbereitet: {environment_dir}", flush=True)
+        else:
+            environment.setdefault("UV_CACHE_DIR", str(root / ".cache" / "uv"))
         try:
             subprocess.run(["uv", "sync", "--frozen"], cwd=root, env=environment, check=True)
         except FileNotFoundError:

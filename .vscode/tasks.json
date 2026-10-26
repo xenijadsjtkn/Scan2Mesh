@@ -12,6 +12,15 @@
           "UV_CACHE_DIR": "${workspaceFolder}/.cache/uv"
         }
       },
+      "windows": {
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "UV_PROJECT_ENVIRONMENT": "${env:LOCALAPPDATA}/Scan2Mesh/venv",
+            "UV_CACHE_DIR": "${env:LOCALAPPDATA}/Scan2Mesh/cache/uv"
+          }
+        }
+      },
       "problemMatcher": [],
       "group": {
         "kind": "build",

@@ -14,13 +14,20 @@ Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch n
    winget install --id astral-sh.uv --exact
    ```
 
-4. Vor dem ersten Start einmal **Strg+Umschalt+B** drücken. Die Standardaufgabe **Scan2Mesh: Umgebung vorbereiten** legt mit `uv sync --frozen` die Python-Umgebung an und installiert die festgelegten Abhängigkeiten. Warten, bis sie erfolgreich abgeschlossen ist.
+4. Vor dem ersten Start einmal **Strg+Umschalt+B** drücken. Die Standardaufgabe **Scan2Mesh: Umgebung vorbereiten** legt mit `uv sync --frozen` die Python-Umgebung unter `%LOCALAPPDATA%\Scan2Mesh\venv` an und installiert die festgelegten Abhängigkeiten. Warten, bis sie erfolgreich abgeschlossen ist; beim ersten Mal müssen die Pakete heruntergeladen werden, was etwas dauern kann.
 5. **`main.py` öffnen und oben rechts auf ▶ „Python-Datei ausführen“ klicken.** Alternativ startet **F5** die Standardkonfiguration **Scan2Mesh: Eigener Scan**.
 6. Im Windows-Dateiauswahldialog die Punktwolke auswählen. Anschließend beginnt die Verarbeitung automatisch. **Abbrechen** schließt die Auswahl ohne Verarbeitung.
 
 Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Unter Windows liegt dieser standardmäßig unter **`%LOCALAPPDATA%\Scan2Mesh\runs`**, beispielsweise in `vscode-scan-<Kennung>\result`. Diesen Basispfad kannst du direkt in die Adressleiste des Windows-Explorers eingeben. Falls `LOCALAPPDATA` nicht gesetzt ist, wird `%USERPROFILE%\AppData\Local\Scan2Mesh\runs` verwendet. Auf anderen Betriebssystemen liegen die Ergebnisse unter `runs` im Repository.
 
 Der vollständige Ergebnisordner wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen. Die ausgewählte Quelldatei bleibt an ihrem ursprünglichen Ort, auch wenn sie in einem OneDrive-Ordner liegt.
+
+VS Code und der Play-Start verwenden unter Windows automatisch die externe Python-Umgebung und den Cache unter `%LOCALAPPDATA%\Scan2Mesh\cache\uv`. Für die folgenden **optionalen Terminalbefehle** diese Pfade einmal pro PowerShell-Terminal setzen, damit auch `uv sync` und `uv run` dieselbe Umgebung verwenden:
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = Join-Path $env:LOCALAPPDATA 'Scan2Mesh\venv'
+$env:UV_CACHE_DIR = Join-Path $env:LOCALAPPDATA 'Scan2Mesh\cache\uv'
+```
 
 Für einen eigenen Ergebnis-Basispfad im Terminal starten:
 
@@ -41,6 +48,12 @@ Auch dabei öffnet sich die Dateiauswahl; die Verarbeitungsschwellen werden an M
 Die alternative Startkonfiguration **Scan2Mesh: Demo** erzeugt und verarbeitet eine synthetische Industrieszene. Sie lässt sich auch mit `uv run python main.py --demo` starten. Ohne Dateiauswahl ist ein Start mit `uv run python main.py --input "C:\Scans\halle.e57"` möglich.
 
 Für die Vorschau der getrennten Flächenverarbeitung unter **Ausführen und Debuggen** die Konfiguration **Scan2Mesh: Segmentierte Rekonstruktion (Vorschau)** wählen und F5 drücken. Es öffnet sich dieselbe Dateiauswahl. Die Vorschau lässt sich auch mit `uv run python main.py --surface-mode segmented` starten. Der normale Play-Start verwendet weiterhin den globalen Modus.
+
+### Falls die Vorbereitung mit `WinError 5` abbricht
+
+Ein Fehler beim Entfernen von `.venv\Lib\site-packages\…dist-info` bedeutet, dass Windows den Zugriff auf diese Paketmetadaten verweigert hat. Liegt die Datei im OneDrive-Repository, ist damit noch nicht geklärt, welcher Prozess oder welche Berechtigung den Zugriff verhindert.
+
+Debugging beenden, die aktuelle Version mit **Pull origin** holen und VS Code neu laden oder neu starten. Danach einmal **Strg+Umschalt+B** ausführen und die erfolgreiche Installation abwarten. Anschließend wie gewohnt mit Play oder der gewünschten F5-Konfiguration starten. Die Einrichtung verwendet nun die Umgebung unter `%LOCALAPPDATA%\Scan2Mesh\venv`; Quellcode und eine vorhandene alte `.venv` bleiben erhalten. Administratorrechte oder manuelles Löschen der alten Umgebung sind dafür nicht erforderlich.
 
 ## Im Terminal starten
 
