@@ -1,12 +1,21 @@
 """Local desktop entry point: choose a scan, then process it."""
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-RUNS_ROOT = Path(__file__).resolve().parents[2] / "runs"
+def default_runs_root() -> Path:
+    if sys.platform == "win32":
+        local_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_data) if local_data else Path.home() / "AppData" / "Local"
+        return base / "Scan2Mesh" / "runs"
+    return Path(__file__).resolve().parents[2] / "runs"
+
+
+RUNS_ROOT = default_runs_root()
 
 # Fixed command: selected paths return as UTF-8 data, never as shell source.
 _WINDOWS_PICKER = r"""
@@ -80,6 +89,7 @@ def main(argv=None):
     source_args.add_argument("--input", type=Path, help="Datei direkt verarbeiten, ohne Auswahldialog")
     source_args.add_argument("--demo", action="store_true", help="Synthetische Demo statt eigener Datei")
     parser.add_argument("--units", choices=["m", "mm"], default="m", help="Eingabekoordinaten; Standard: Meter")
+    parser.add_argument("--output-root", type=Path, help="Speicherort fuer neue Ergebnisordner; Windows-Standard: LOCALAPPDATA/Scan2Mesh/runs")
     args = parser.parse_args(argv)
     if args.demo and args.units != "m":
         parser.error("Die synthetische Demo verwendet Meter.")
@@ -102,8 +112,12 @@ def main(argv=None):
     from .demo import generate_demo
     from .pipeline import PipelineConfig, run_pipeline
 
-    RUNS_ROOT.mkdir(parents=True, exist_ok=True)
-    run_dir = Path(tempfile.mkdtemp(prefix="vscode-demo-" if args.demo else "vscode-scan-", dir=RUNS_ROOT))
+    runs_root = args.output_root.expanduser().resolve() if args.output_root is not None else RUNS_ROOT
+    try:
+        runs_root.mkdir(parents=True, exist_ok=True)
+        run_dir = Path(tempfile.mkdtemp(prefix="vscode-demo-" if args.demo else "vscode-scan-", dir=runs_root))
+    except OSError as exc:
+        parser.exit(2, f"Scan2Mesh: Ausgabeordner kann nicht angelegt werden: {runs_root}: {exc}\n")
     if args.demo:
         source = run_dir / "demo.ply"
         generate_demo(source)

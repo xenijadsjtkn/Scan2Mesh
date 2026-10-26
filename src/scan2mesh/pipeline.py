@@ -7,7 +7,9 @@ intentional hole filling are inferred here.
 import copy
 import json
 import math
+import shutil
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -73,6 +75,44 @@ def _sample_rows(points: np.ndarray, limit: int, rng) -> np.ndarray:
     if len(points) <= limit:
         return points
     return points[rng.choice(len(points), limit, replace=False)]
+
+
+def _publish_staged_results(staged: Path, output_dir: Path) -> None:
+    """Publish a complete result directory, retaining it if publication fails.
+
+    Windows scanners and sync clients can briefly hold directory handles. Retry
+    only the corresponding Windows rename errors, without relaxing permissions
+    or replacing existing files. The caller owns staging cleanup on success.
+    """
+    staged, output_dir = Path(staged).absolute(), Path(output_dir).absolute()
+    retry_delays = (0.2, 0.5, 1.0)
+
+    def failure(exc: OSError) -> OSError:
+        return OSError(
+            f"Could not publish completed results to {output_dir}. "
+            f"Original reason: {exc}. Complete results are retained for recovery at: {staged}"
+        )
+
+    for attempt in range(len(retry_delays) + 1):
+        try:
+            # Recheck before every attempt: another process may have created
+            # files since processing or the previous rename attempt started.
+            if output_dir.is_symlink() or (output_dir.exists() and (
+                not output_dir.is_dir() or any(output_dir.iterdir())
+            )):
+                raise FileExistsError(f"Output must be a new or empty directory: {output_dir}")
+            if output_dir.exists():
+                output_dir.rmdir()  # Fails safely if files appeared meanwhile.
+        except OSError as exc:
+            raise failure(exc) from exc
+        try:
+            staged.rename(output_dir)
+            return
+        except OSError as exc:
+            if getattr(exc, "winerror", None) in {5, 32, 33} and attempt < len(retry_delays):
+                time.sleep(retry_delays[attempt])
+                continue
+            raise failure(exc) from exc
 
 
 def _segment_planes(cloud, config, origin):
@@ -273,10 +313,12 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
         ],
     }
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Publish results together. Failed processing never leaves plausible partial
-    # results under the requested output name, nor overwrites a previous run.
-    with tempfile.TemporaryDirectory(prefix=".scan2mesh-", dir=output_dir.parent) as temporary:
-        staged = Path(temporary) / "result"
+    # Publish results together. Incomplete writes are cleaned up, but complete
+    # results survive publication failures (for example a Windows sync lock).
+    temporary = Path(tempfile.mkdtemp(prefix=".scan2mesh-", dir=output_dir.parent))
+    complete, published = False, False
+    try:
+        staged = temporary / "result"
         staged.mkdir()
         for filename, output_cloud in (("cleaned.ply", cloud), ("segments.ply", segmented)):
             output_cloud.translate(origin)
@@ -286,7 +328,12 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
         if not o3d.io.write_triangle_mesh(str(staged / "mesh.ply"), mesh):
             raise OSError("Could not write mesh.ply")
         (staged / "report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-        if output_dir.exists():
-            output_dir.rmdir()  # Only an empty directory may be replaced.
-        staged.rename(output_dir)
+        complete = True
+        _publish_staged_results(staged, output_dir)
+        published = True
+    finally:
+        if not complete or published:
+            # Cleanup must not hide the original write failure or report a
+            # failed run after results have already been published successfully.
+            shutil.rmtree(temporary, ignore_errors=True)
     return report

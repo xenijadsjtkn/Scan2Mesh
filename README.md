@@ -18,7 +18,17 @@ Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch n
 5. **`main.py` öffnen und oben rechts auf ▶ „Python-Datei ausführen“ klicken.** Alternativ startet **F5** die Standardkonfiguration **Scan2Mesh: Eigener Scan**.
 6. Im Windows-Dateiauswahldialog die Punktwolke auswählen. Anschließend beginnt die Verarbeitung automatisch. **Abbrechen** schließt die Auswahl ohne Verarbeitung.
 
-Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Der tatsächliche Pfad wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen.
+Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Unter Windows liegt dieser standardmäßig unter **`%LOCALAPPDATA%\Scan2Mesh\runs`**, beispielsweise in `vscode-scan-<Kennung>\result`. Diesen Basispfad kannst du direkt in die Adressleiste des Windows-Explorers eingeben. Falls `LOCALAPPDATA` nicht gesetzt ist, wird `%USERPROFILE%\AppData\Local\Scan2Mesh\runs` verwendet. Auf anderen Betriebssystemen liegen die Ergebnisse unter `runs` im Repository.
+
+Der vollständige Ergebnisordner wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen. Die ausgewählte Quelldatei bleibt an ihrem ursprünglichen Ort, auch wenn sie in einem OneDrive-Ordner liegt.
+
+Für einen eigenen Ergebnis-Basispfad im Terminal starten:
+
+```powershell
+uv run python main.py --output-root "D:\Scan2Mesh-Ergebnisse"
+```
+
+Auch dieser Start öffnet die Dateiauswahl und erzeugt anschließend einen neuen Ergebnisordner am gewählten Speicherort. Falls die Ausgabe abschließend nicht in den Ergebnisordner übernommen werden kann, bleiben fertig geschriebene Dateien am im Terminal genannten Wiederherstellungspfad erhalten.
 
 Der einfache Start geht von **Koordinaten in Metern** aus, wie bei einem üblichen E57-Export. Einheiten werden nicht automatisch erkannt. Voxelgröße und Ebenentoleranz sind zunächst auf einen Zentimeter eingestellt. Für eine Punktwolke mit Millimeterkoordinaten im Terminal stattdessen starten:
 

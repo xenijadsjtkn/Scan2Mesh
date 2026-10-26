@@ -339,3 +339,86 @@ def test_bootstrap_inside_project_environment_calls_application_directly(
     monkeypatch.setattr(launcher.subprocess, "run", forbid_processing)
 
     assert launcher.main() == marker
+
+
+def test_windows_default_output_uses_local_app_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_data = tmp_path / "Lokale Daten Ä"
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_data))
+
+    destination = desktop.default_runs_root()
+
+    assert destination == local_data / "Scan2Mesh" / "runs"
+    assert not local_data.exists()
+
+
+def test_windows_output_falls_back_to_local_user_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_home = tmp_path / "user-home"
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: user_home))
+
+    destination = desktop.default_runs_root()
+
+    assert destination == user_home / "AppData" / "Local" / "Scan2Mesh" / "runs"
+    assert not user_home.exists()
+
+
+def test_non_windows_default_output_stays_in_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+
+    assert desktop.default_runs_root() == Path(desktop.__file__).resolve().parents[2] / "runs"
+
+
+def test_custom_output_root_resolves_relative_to_caller(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "scan.ply"
+    source.write_text("placeholder\n")
+    chosen_root = Path("Ergebnisse Ä") / ".." / "Eigene Ergebnisse"
+    calls = []
+
+    def process(input_path, output, config):
+        calls.append(output)
+        return {"counts": {"mesh_triangles": 1}}
+
+    stub_processing(monkeypatch, process)
+
+    result = desktop.main(["--input", str(source), "--output-root", str(chosen_root)])
+
+    assert result.parent.parent == (tmp_path / "Eigene Ergebnisse").resolve()
+    assert calls == [result]
+    assert not runs_root.exists()
+
+
+def test_cancellation_does_not_create_custom_output_root(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "unused-custom-output"
+    monkeypatch.setattr(desktop, "choose_scan_file", lambda: None)
+    stub_processing(monkeypatch, forbid_processing)
+
+    assert desktop.main(["--output-root", str(destination)]) is None
+
+    assert not destination.exists()
+    assert not runs_root.exists()
+
+
+def test_invalid_input_does_not_create_custom_output_root(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "unused-custom-output"
+    source = tmp_path / "missing.ply"
+    stub_processing(monkeypatch, forbid_processing)
+
+    with pytest.raises(SystemExit) as error:
+        desktop.main(["--input", str(source), "--output-root", str(destination)])
+
+    assert error.value.code == 2
+    assert not destination.exists()
+    assert not runs_root.exists()

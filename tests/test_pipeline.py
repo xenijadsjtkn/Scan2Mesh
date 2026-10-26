@@ -8,6 +8,7 @@ import open3d as o3d
 import pye57
 import pytest
 
+from scan2mesh import pipeline
 from scan2mesh.pipeline import PipelineConfig, run_pipeline
 from scan2mesh.demo import generate_demo
 
@@ -358,3 +359,129 @@ def test_e57_applies_scan_pose_before_world_space_crop_and_plane_fit(
     assert np.all(cleaned.get_min_bound() >= np.array(crop[:3]) - 1e-6)
     assert np.all(cleaned.get_max_bound() <= np.array(crop[3:]) + 1e-6)
     assert report["quality"]["point_to_mesh"]["p95"] < 0.02
+
+
+def create_staged_results(tmp_path: Path) -> tuple[Path, dict[str, bytes]]:
+    staged = tmp_path / ".scan2mesh-staging" / "result"
+    staged.mkdir(parents=True)
+    contents = {
+        "mesh.ply": b"complete mesh\n",
+        "cleaned.ply": b"complete cleaned cloud\n",
+        "segments.ply": b"complete segmented cloud\n",
+        "report.json": b'{"complete": true}\n',
+    }
+    for filename, payload in contents.items():
+        (staged / filename).write_bytes(payload)
+    return staged, contents
+
+
+def windows_lock_error(code: int = 5) -> PermissionError:
+    error = PermissionError(13, "Simulated Windows publication lock")
+    error.winerror = code
+    return error
+
+
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_publication_retries_transient_windows_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winerror: int
+) -> None:
+    staged, contents = create_staged_results(tmp_path)
+    output = tmp_path / "published"
+    actual_rename = Path.rename
+    attempts, waits = [], []
+
+    def temporarily_locked(path, destination):
+        if path == staged:
+            attempts.append(destination)
+            if len(attempts) <= 2:
+                raise windows_lock_error(winerror)
+        return actual_rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", temporarily_locked)
+    monkeypatch.setattr(pipeline.time, "sleep", waits.append)
+
+    pipeline._publish_staged_results(staged, output)
+
+    assert len(attempts) == 3
+    assert len(waits) == 2
+    assert all(0 < duration <= 1 for duration in waits)
+    assert not staged.exists()
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == contents
+
+
+def test_permanent_publication_lock_keeps_complete_staged_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged, contents = create_staged_results(tmp_path)
+    output = tmp_path / "published"
+    attempts, waits = [], []
+
+    def permanently_locked(path, destination):
+        attempts.append(destination)
+        raise windows_lock_error()
+
+    monkeypatch.setattr(Path, "rename", permanently_locked)
+    monkeypatch.setattr(pipeline.time, "sleep", waits.append)
+
+    with pytest.raises(OSError) as error:
+        pipeline._publish_staged_results(staged, output)
+
+    assert len(attempts) == 4
+    assert len(waits) == 3
+    assert str(staged.resolve()) in str(error.value)
+    assert not output.exists()
+    assert {path.name: path.read_bytes() for path in staged.iterdir()} == contents
+
+
+def test_publication_never_overwrites_a_nonempty_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged, contents = create_staged_results(tmp_path)
+    output = tmp_path / "published"
+    output.mkdir()
+    marker = output / "existing-mesh.ply"
+    marker.write_bytes(b"existing work\n")
+    monkeypatch.setattr(pipeline.time, "sleep", lambda duration: pytest.fail("Do not retry existing results"))
+
+    with pytest.raises(OSError):
+        pipeline._publish_staged_results(staged, output)
+
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == {
+        "existing-mesh.ply": b"existing work\n"
+    }
+    assert {path.name: path.read_bytes() for path in staged.iterdir()} == contents
+
+
+def test_pipeline_publication_failure_preserves_real_recoverable_results(
+    tmp_path: Path, sphere_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "locked-result"
+    actual_rename = Path.rename
+    recovery_locations = []
+
+    def deny_final_publication(path, destination):
+        if Path(destination) == output:
+            recovery_locations.append(path)
+            raise windows_lock_error()
+        return actual_rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", deny_final_publication)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda duration: None)
+
+    with pytest.raises(OSError) as error:
+        run_pipeline(sphere_path, output, PipelineConfig(max_planes=0))
+
+    assert len(set(recovery_locations)) == 1
+    recovered = recovery_locations[0]
+    assert str(recovered.resolve()) in str(error.value)
+    assert not output.exists()
+    assert {path.name for path in recovered.iterdir()} == {
+        "mesh.ply", "cleaned.ply", "segments.ply", "report.json"
+    }
+    report = json.loads((recovered / "report.json").read_text())
+    mesh = o3d.io.read_triangle_mesh(str(recovered / "mesh.ply"))
+    cleaned = o3d.io.read_point_cloud(str(recovered / "cleaned.ply"))
+    segmented = o3d.io.read_point_cloud(str(recovered / "segments.ply"))
+    assert len(mesh.triangles) == report["counts"]["mesh_triangles"] > 2_000
+    assert len(cleaned.points) == len(segmented.points) == report["counts"]["cleaned_points"]
+    assert report["input_path"] == str(sphere_path.resolve())
