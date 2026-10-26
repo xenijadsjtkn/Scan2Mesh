@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scan2mesh"
+version = "0.1.0"
+description = "Reproducible point-cloud reconstruction experiments for industrial site scans"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy==2.2.6",
+    "open3d==0.20.0",
+    "plyfile>=1.1,<2",
+    "pye57==0.4.19",
+]
+
+[project.scripts]
+scan2mesh = "scan2mesh.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
