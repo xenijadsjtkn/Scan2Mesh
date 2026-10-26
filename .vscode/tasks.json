@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Scan2Mesh: Umgebung vorbereiten",
+      "type": "process",
+      "command": "uv",
+      "args": ["sync", "--frozen"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "UV_CACHE_DIR": "${workspaceFolder}/.cache/uv"
+        }
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

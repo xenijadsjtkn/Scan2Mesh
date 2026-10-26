@@ -4,7 +4,25 @@ Ein Python-Prototyp für die Verarbeitung von Punktwolken aus Baustellen und Ind
 
 Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch nicht automatisch als Wand, Boden oder Bauteil. Rohr- und Objekterkennung, eine Optimierung der Scanregistrierung und CAD-Ableitung sind noch nicht enthalten.
 
-## Schnellstart
+## In VS Code starten (Windows)
+
+1. Die aktuelle lokale Kopie des Repositorys über **Datei → Ordner öffnen** in VS Code öffnen. Im geöffneten Ordner muss `pyproject.toml` liegen.
+2. Die empfohlenen Microsoft-Erweiterungen **Python** und **Python Debugger** installieren.
+3. Falls `uv` noch fehlt, im integrierten Terminal installieren und VS Code danach neu starten:
+
+   ```powershell
+   winget install --id astral-sh.uv --exact
+   ```
+
+4. Vor dem ersten Start einmal **Strg+Umschalt+B** drücken. Die Standardaufgabe **Scan2Mesh: Umgebung vorbereiten** legt mit `uv sync --frozen` die Python-Umgebung an und installiert die festgelegten Abhängigkeiten. Warten, bis sie erfolgreich abgeschlossen ist.
+5. **F5** drücken. Die Standardkonfiguration **Scan2Mesh: Demo** verarbeitet eine synthetische Industrieszene. Vor jedem Start werden die Abhängigkeiten automatisch mit `uv sync --frozen` geprüft.
+6. Für eigene Daten unter **Ausführen und Debuggen** die Konfiguration **Scan2Mesh: Eigener Scan** auswählen und F5 drücken. Den Dateipfad ohne umgebende Anführungszeichen eingeben; absolute Pfade und Pfade relativ zum Repository sind möglich. Anschließend die Einheit der Eingabekoordinaten wählen: `m` oder `mm`. Für einen üblichen E57-Export in Metern `m` wählen.
+
+Jeder Start schreibt in einen neuen Ordner; die Demo beispielsweise nach `runs/vscode-demo-<eindeutige Kennung>/result`. Der tatsächliche Pfad wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen; eine eigene grafische Oberfläche ist noch nicht enthalten.
+
+Bei eigenen Scans setzt dieser Schnellstart Voxelgröße und Ebenentoleranz auf einen Zentimeter in der gewählten Eingabeeinheit. Das ist ein Ausgangspunkt und muss für feine Bauteile gegebenenfalls angepasst werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
+
+## Im Terminal starten
 
 Im Repository-Verzeichnis mit Python 3.12 und [uv](https://docs.astral.sh/uv/):
 
