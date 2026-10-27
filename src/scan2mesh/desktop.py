@@ -1,6 +1,7 @@
 """Local desktop entry point: choose a scan, then process it."""
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -133,7 +134,31 @@ def main(argv=None):
     parser.add_argument("--units", choices=["m", "mm"], default="m", help="Eingabekoordinaten; Standard: Meter")
     parser.add_argument("--output-root", type=Path, help="Speicherort fuer neue Ergebnisordner; Windows-Standard: LOCALAPPDATA/Scan2Mesh/runs")
     parser.add_argument("--surface-mode", choices=["global", "segmented"], default="global", help="Segmentierte Rekonstruktion als geometrische Vorschau")
+    parser.add_argument("--reconstruction", choices=["ball-pivoting", "poisson", "nksr"], default="ball-pivoting")
+    parser.add_argument("--voxel-size", type=float, help="Punktreduktion in Eingabeeinheiten; 0 deaktiviert sie. NKSR-Standard: 0")
+    parser.add_argument("--normal-radius", type=float, help="Nachbarschaftsradius fuer Normalen, in Eingabeeinheiten")
+    parser.add_argument("--crop", type=float, nargs=6, metavar=("XMIN", "YMIN", "ZMIN", "XMAX", "YMAX", "ZMAX"), help="Ausschnitt in den Originalkoordinaten")
+    parser.add_argument("--check-neural", action="store_true", help="Nur NKSR-Installation und GPU pruefen, ohne Dateiauswahl oder Modelldownload")
+    from .cli import add_neural_reconstruction_arguments
+
+    add_neural_reconstruction_arguments(parser)
     args = parser.parse_args(argv)
+    if args.check_neural:
+        from .neural import diagnose_nksr
+
+        try:
+            diagnosis = diagnose_nksr(
+                python=args.nksr_python, wsl_distro=args.nksr_wsl_distro,
+                timeout=min(args.nksr_timeout, 30.0),
+            )
+            print(json.dumps(diagnosis, indent=2, allow_nan=False))
+        except (ValueError, OSError, RuntimeError) as exc:
+            parser.exit(2, f"Scan2Mesh: {exc}\n")
+        if not diagnosis.get("ready"):
+            parser.exit(2)
+        return None
+    if args.reconstruction == "nksr" and args.surface_mode != "global":
+        parser.error("NKSR verarbeitet derzeit den gesamten Ausschnitt; --surface-mode global verwenden.")
     if args.demo and args.units != "m":
         parser.error("Die synthetische Demo verwendet Meter.")
     source = args.input
@@ -155,6 +180,27 @@ def main(argv=None):
     from .demo import generate_demo
     from .pipeline import PipelineConfig, run_pipeline
 
+    options = {
+        "reconstruction": args.reconstruction, "surface_mode": args.surface_mode,
+        "input_units": args.units,
+        "max_planes": 8 if args.surface_mode == "segmented" else 3,
+        "normal_radius": args.normal_radius,
+        "crop": tuple(args.crop) if args.crop is not None else None,
+        "nksr_python": args.nksr_python, "nksr_wsl_distro": args.nksr_wsl_distro,
+        "nksr_detail_level": args.nksr_detail_level,
+        "nksr_voxel_size": args.nksr_voxel_size, "nksr_timeout": args.nksr_timeout,
+    }
+    scale = 1 if args.units == "m" else 1_000
+    default_voxel = 0.025 if args.demo else 0.01 * scale
+    if args.reconstruction == "nksr":
+        default_voxel = 0.0
+    options["voxel_size"] = default_voxel if args.voxel_size is None else args.voxel_size
+    options["plane_distance"] = 0.015 if args.demo else 0.01 * scale
+    try:
+        config = PipelineConfig(**options)
+    except ValueError as exc:
+        parser.exit(2, f"Scan2Mesh: {exc}\n")
+
     runs_root = args.output_root.expanduser().resolve() if args.output_root is not None else RUNS_ROOT
     try:
         runs_root.mkdir(parents=True, exist_ok=True)
@@ -164,10 +210,6 @@ def main(argv=None):
     if args.demo:
         source = run_dir / "demo.ply"
         generate_demo(source)
-        config = PipelineConfig(voxel_size=0.025, plane_distance=0.015, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
-    else:
-        scale = 1 if args.units == "m" else 1_000
-        config = PipelineConfig(voxel_size=0.01 * scale, plane_distance=0.01 * scale, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
     result = run_dir / "result"
     print(f"Eingabe: {source}", flush=True)
     print(f"Ausgabe: {result}", flush=True)
@@ -176,6 +218,9 @@ def main(argv=None):
     print("Verarbeitung laeuft ...", flush=True)
     if args.surface_mode == "segmented":
         print("Vorschau: zusammenhaengende Ebenenbereiche, keine semantische Objekterkennung.", flush=True)
+    if args.reconstruction == "nksr":
+        print("NKSR: experimentelle neuronale Rekonstruktion; keine semantische Segmentierung.", flush=True)
+        print("NKSR-Code: nur nichtkommerzielle Forschung/Evaluation. Einrichtung: docs/nksr.md", flush=True)
     try:
         with _ProgressPrinter() as progress:
             report = run_pipeline(source, result, config, progress=progress)

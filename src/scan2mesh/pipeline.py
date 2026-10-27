@@ -37,6 +37,12 @@ class PipelineConfig:
     seed: int = 7
     crop: tuple[float, float, float, float, float, float] | None = None
     surface_mode: str = "global"
+    input_units: str = "m"
+    nksr_python: str | None = None
+    nksr_wsl_distro: str | None = None
+    nksr_detail_level: float = 0.0
+    nksr_voxel_size: float | None = None
+    nksr_timeout: float = 1800.0
 
     def __post_init__(self):
         if not math.isfinite(self.voxel_size) or self.voxel_size < 0:
@@ -55,10 +61,26 @@ class PipelineConfig:
             raise ValueError("poisson_depth must be an integer between 4 and 10 (memory bounded prototype)")
         if self.seed >= 2**31:
             raise ValueError("seed must be < 2**31")
-        if self.reconstruction not in ("ball-pivoting", "poisson"):
-            raise ValueError("reconstruction must be ball-pivoting or poisson")
+        if self.reconstruction not in ("ball-pivoting", "poisson", "nksr"):
+            raise ValueError("reconstruction must be ball-pivoting, poisson or nksr")
         if self.surface_mode not in ("global", "segmented"):
             raise ValueError("surface_mode must be global or segmented")
+        if self.input_units not in ("m", "mm"):
+            raise ValueError("input_units must be m or mm; units are not inferred")
+        if self.reconstruction == "nksr" and self.surface_mode != "global":
+            raise ValueError("NKSR currently requires surface_mode=global; it reconstructs the entire selected excerpt")
+        for name in ("nksr_python", "nksr_wsl_distro"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{name} must be a nonempty string")
+        if not math.isfinite(self.nksr_detail_level) or not 0 <= self.nksr_detail_level <= 1:
+            raise ValueError("nksr_detail_level must be between 0 and 1")
+        if self.nksr_voxel_size is not None and (
+            not math.isfinite(self.nksr_voxel_size) or self.nksr_voxel_size <= 0
+        ):
+            raise ValueError("nksr_voxel_size must be positive and finite, in input coordinate units")
+        if not math.isfinite(self.nksr_timeout) or self.nksr_timeout <= 0:
+            raise ValueError("nksr_timeout must be positive and finite")
         if self.crop is not None:
             if len(self.crop) != 6 or not np.isfinite(self.crop).all():
                 raise ValueError("crop must contain six finite coordinates")
@@ -181,6 +203,56 @@ def _prepare_normals(cloud, radius, *, progress: Callable[[str], None] | None = 
     cloud.normalize_normals()
 
 
+def _finish_mesh(mesh, *, allow_empty=False):
+    mesh.remove_duplicated_vertices()
+    mesh.remove_duplicated_triangles()
+    mesh.remove_degenerate_triangles()
+    mesh.remove_unreferenced_vertices()
+    if len(mesh.triangles) == 0:
+        if not allow_empty:
+            raise ValueError("Reconstruction produced no triangles; check point spacing and reconstruction settings")
+    else:
+        mesh.compute_vertex_normals()
+    return mesh
+
+
+def _reconstruct_neural(cloud, config):
+    # PyTorch and NKSR remain in a separately configured process/environment.
+    from .neural import reconstruct_nksr
+
+    # NKSR's pretrained hierarchy and automatic detail selection use a fixed
+    # nominal scale. Normalize explicitly so the same scan in mm and metres
+    # reaches the model identically; restore source units before evaluation.
+    input_units_to_meters = 1.0 if config.input_units == "m" else 0.001
+    vertices, triangles, metadata = reconstruct_nksr(
+        np.asarray(cloud.points) * input_units_to_meters, np.asarray(cloud.normals),
+        python=config.nksr_python, wsl_distro=config.nksr_wsl_distro,
+        detail_level=config.nksr_detail_level,
+        voxel_size=config.nksr_voxel_size * input_units_to_meters if config.nksr_voxel_size is not None else None,
+        timeout=config.nksr_timeout,
+    )
+    vertices = vertices / input_units_to_meters
+    mesh = o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(vertices), o3d.utility.Vector3iVector(triangles)
+    )
+    if cloud.has_colors():
+        from scipy.spatial import cKDTree
+
+        _, nearest = cKDTree(np.asarray(cloud.points)).query(vertices, workers=1)
+        mesh.vertex_colors = o3d.utility.Vector3dVector(np.asarray(cloud.colors)[nearest])
+    metadata = dict(metadata)
+    metadata.update(
+        orientation_source="Open3D estimated normals, oriented by Scan2Mesh",
+        scanner_positions_used=False,
+        semantic_segmentation=False,
+        color_transfer="nearest cleaned point" if cloud.has_colors() else None,
+        input_units=config.input_units, backend_units="m",
+        input_units_to_meters=input_units_to_meters,
+        requested_voxel_size=config.nksr_voxel_size,
+    )
+    return _finish_mesh(mesh), metadata
+
+
 def _reconstruct(cloud, config, nearest_distances, *, allow_empty=False):
     density_summary = None
     radii = []
@@ -203,23 +275,16 @@ def _reconstruct(cloud, config, nearest_distances, *, allow_empty=False):
         mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
             cloud, o3d.utility.DoubleVector(radii)
         )
-    else:
+    elif config.reconstruction == "poisson":
         mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
             cloud, depth=config.poisson_depth, n_threads=4
         )
         density_summary = _summarize(np.asarray(densities))
         # Do not hide invented geometry by implicitly cropping or trimming it.
         # The distance report exposes it for comparison with the open method.
-    mesh.remove_duplicated_vertices()
-    mesh.remove_duplicated_triangles()
-    mesh.remove_degenerate_triangles()
-    mesh.remove_unreferenced_vertices()
-    if len(mesh.triangles) == 0:
-        if not allow_empty:
-            raise ValueError("Reconstruction produced no triangles; check point spacing and normal/ball radius")
     else:
-        mesh.compute_vertex_normals()
-    return mesh, radii, density_summary
+        raise ValueError("Use the neural reconstruction path for NKSR")
+    return _finish_mesh(mesh, allow_empty=allow_empty), radii, density_summary
 
 
 def _reconstruct_segmented(cloud, config, origin, *, progress: Callable[[str], None] | None = None):
@@ -389,15 +454,20 @@ def run_pipeline(
         raise ValueError("Could not determine positive point spacing")
     normal_radius = config.normal_radius or max(4 * spacing, 2 * config.voxel_size)
     _prepare_normals(cloud, normal_radius, progress=progress)
-    segmentation_info, patch_ids = None, None
+    segmentation_info, patch_ids, neural_info = None, None, None
     if config.surface_mode == "segmented":
         _notify_progress(progress, "Rekonstruktion: Segmentierte Verarbeitung startet ...")
         mesh, segmented, planes, segmentation_info, patch_ids, ball_radii, density_summary = _reconstruct_segmented(cloud, config, origin, progress=progress)
     else:
         _notify_progress(progress, "Rekonstruktion: Ebenen werden fuer die Darstellung erkannt ...")
         segmented, planes = _segment_planes(cloud, config, origin)
-        _notify_progress(progress, "Rekonstruktion: Globales Dreiecksmesh wird erzeugt ...")
-        mesh, ball_radii, density_summary = _reconstruct(cloud, config, nearest)
+        if config.reconstruction == "nksr":
+            _notify_progress(progress, "Rekonstruktion: NKSR-Modell wird geladen und der Ausschnitt auf der GPU rekonstruiert ...")
+            mesh, neural_info = _reconstruct_neural(cloud, config)
+            ball_radii, density_summary = [], None
+        else:
+            _notify_progress(progress, "Rekonstruktion: Globales Dreiecksmesh wird erzeugt ...")
+            mesh, ball_radii, density_summary = _reconstruct(cloud, config, nearest)
     _notify_progress(progress, f"Rekonstruktion abgeschlossen: {len(mesh.triangles)} Dreiecke.")
     _notify_progress(progress, "Qualitaetspruefung: Abstaende und Mesh-Topologie werden ausgewertet ...")
     quality = _quality(mesh, cloud, original, config.seed)
@@ -408,6 +478,7 @@ def run_pipeline(
         "config": json.loads(json.dumps(asdict(config))), "import": import_info,
         "counts": counts, "planes": planes, "quality": quality,
         "segmentation": segmentation_info,
+        "neural_reconstruction": neural_info,
         "analysis": {
             "coordinate_origin": origin.tolist(), "median_nearest_neighbor_distance": spacing,
             "normal_radius": normal_radius, "ball_radii": ball_radii
@@ -416,10 +487,16 @@ def run_pipeline(
         },
         "limitations": [
             "Geometric plane detection only; no semantic object labels or cylinder fitting.",
-            "No explicit hole filling or protected openings. Either reconstruction method may bridge gaps.",
+            "No explicit hole filling or protected openings. Reconstruction methods may bridge gaps.",
             "Already registered excerpts only; input is loaded in memory. No accuracy acceptance threshold is implied.",
         ],
     }
+    if neural_info is not None:
+        report["limitations"].extend([
+            "Experimental NKSR adapter; GPU inference and accuracy must be validated on a real scan.",
+            "NKSR code is restricted to noncommercial research/evaluation; model weights have a separate license.",
+            "NKSR currently uses estimated normals, not E57 scanner positions; large-scene chunking is not implemented.",
+        ])
     _notify_progress(progress, "Ergebnisse schreiben: Punktwolken, Mesh und Bericht werden gespeichert ...")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     # Publish results together. Incomplete writes are cleaned up, but complete

@@ -92,6 +92,28 @@ uv run scan2mesh process /pfad/zum/ausschnitt.ply --output runs/segmentiert --su
 
 Punktdichte und Verarbeitungsschwellen begrenzen auch hier den Detailerhalt. Kleine Öffnungen können überbrückt werden; der Modus garantiert nicht die Erhaltung aller Löcher. Die globale Rekonstruktion bleibt der Standard (`--surface-mode global`) und dient als Vergleich. Ein Nachweis besserer Genauigkeit an einem realen Baustellenscan steht noch aus.
 
+## Neuronale Rekonstruktion mit NKSR (experimentell)
+
+Mit `--reconstruction nksr` lässt sich ein vortrainiertes neuronales Rekonstruktionsmodell als zusätzlicher Mesher auswählen. NKSR verarbeitet Punkte und orientierte Oberflächennormalen; automatische Klassen wie „Rohr“, „Wand“ oder „Maschine“ erzeugt es nicht. Die erste Einbindung verarbeitet kleine Ausschnitte im globalen Modus. Eine Kombination mit `--surface-mode segmented` und eine Verarbeitung großer Scans in Blöcken sind hier noch nicht enthalten.
+
+NKSR benötigt eine **separate Linux-/WSL-Umgebung mit CUDA und PyTorch**. Die normale Scan2Mesh-Umgebung bleibt unabhängig davon. Einrichtung, Windows-/WSL-Beispiele und Grenzen stehen in der [NKSR-Anleitung](docs/nksr.md). Nach der Einrichtung prüft dieser Befehl die gewählte Umgebung und zeigt GPU, Grafikspeicher und fehlende Voraussetzungen, ohne Modellgewichte herunterzuladen:
+
+```bash
+uv run scan2mesh neural-check --nksr-python /pfad/zur/nksr-umgebung/bin/python
+```
+
+Einen kleinen Ausschnitt anschließend ausdrücklich mit NKSR verarbeiten:
+
+```bash
+uv run scan2mesh process /pfad/zum/ausschnitt.ply --output runs/nksr-versuch --reconstruction nksr --nksr-python /pfad/zur/nksr-umgebung/bin/python --units m --voxel-size 0 --nksr-detail-level 0
+```
+
+Das Beispiel verwendet Meterkoordinaten. Bei Millimeterkoordinaten auch in der CLI `--units mm` angeben und die Längentoleranzen in Millimetern setzen. Scan2Mesh rechnet nur die internen NKSR-Arbeitskoordinaten nach Metern um und das Mesh danach zurück; Eingabe- und Ergebnisdateien behalten ihre ursprünglichen Einheiten. Weitere Beispiele stehen in der Anleitung.
+
+Der erste Rekonstruktionslauf kann das offizielle vortrainierte Modell herunterladen. Scanpunkte werden lokal an den Rekonstruktionsprozess übergeben. Für Windows kann der Prozess in einer angegebenen WSL-Distribution laufen; die Anleitung zeigt die dafür erforderlichen Einstellungen. Ein besseres Ergebnis an echten Industrieaufnahmen muss durch den Vergleich mit Ball Pivoting und Poisson erst nachgewiesen werden.
+
+**Lizenz:** Der [NKSR-Quellcode](https://github.com/nv-tlabs/NKSR/blob/public/LICENSE.txt) ist nach Abschnitt 3.3 auf nichtkommerzielle Forschung und Evaluation beschränkt. Die vortrainierten „kitchen-sink“-Gewichte haben laut [Projektbeschreibung](https://github.com/nv-tlabs/NKSR) eine eigene CC-BY-SA-4.0-Lizenz. Diese experimentelle Einbindung ist keine Freigabe für einen späteren kommerziellen Einsatz.
+
 ## Eigene Scans
 
 Unterstützte Eingabeformate sind `.e57`, `.ply`, `.pcd`, `.xyz`, `.xyzn`, `.xyzrgb` und `.pts`. E57-Dateien werden über `pye57` gelesen; gespeicherte Scanpositionen und -orientierungen werden angewendet. Eine fehlerhafte Registrierung wird dabei nicht neu berechnet oder optimiert. ReCap-Projektdateien im Format RCP/RCS werden nicht direkt gelesen; zunächst beispielsweise E57 exportieren.
@@ -111,7 +133,7 @@ Die Reihenfolge ist `xmin ymin zmin xmax ymax zmax`. Die Beispielgrenzen müssen
 
 Für den Anfang einen kleinen, bereits registrierten Ausschnitt wählen, der eine relevante Fläche, eine echte Öffnung und ein feines Bauteil enthält. Das Zuschneiden erfolgt vor der aufwendigen Bereinigung und Rekonstruktion. Der Import liest Punktdaten jedoch zunächst in den Arbeitsspeicher; `--crop` ist keine Verarbeitung großer Dateien in speicherbegrenzten Blöcken. Ein kompletter Kraftwerks- oder Baustellenscan ist noch kein geprüfter Anwendungsfall.
 
-**Einheiten werden aus den Koordinaten übernommen und nicht automatisch erkannt oder umgerechnet.** Bei einer Punktwolke in Metern entsprechen `0.01` einem Zentimeter. Bei Millimeterkoordinaten müssen die Parameter entsprechend angepasst werden. Die Demo-Einstellungen sind kein allgemeines Genauigkeitsversprechen. Eine zu große Voxelgröße kann dünne Strukturen entfernen.
+**Einheiten werden nicht automatisch erkannt. Eingabe- und Ergebnisdateien behalten ihre Koordinateneinheiten.** Bei einer Punktwolke in Metern entsprechen `0.01` einem Zentimeter. Bei Millimeterkoordinaten `--units mm` angeben und die Längenparameter entsprechend setzen. Die CLI skaliert ausdrücklich angegebene Toleranzen nicht automatisch. Für NKSR werden die Arbeitskoordinaten intern nach Metern umgerechnet und anschließend zurücktransformiert. Die Demo-Einstellungen sind kein allgemeines Genauigkeitsversprechen. Eine zu große Voxelgröße kann dünne Strukturen entfernen.
 
 Die Quelldatei bleibt unverändert. Als Ausgabe einen neuen oder leeren Ordner verwenden; bestehende Ergebnisse werden nicht überschrieben.
 
