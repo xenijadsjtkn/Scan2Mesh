@@ -20,7 +20,9 @@ Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch n
 
 Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Unter Windows liegt dieser standardmäßig unter **`%LOCALAPPDATA%\Scan2Mesh\runs`**, beispielsweise in `vscode-scan-<Kennung>\result`. Diesen Basispfad kannst du direkt in die Adressleiste des Windows-Explorers eingeben. Falls `LOCALAPPDATA` nicht gesetzt ist, wird `%USERPROFILE%\AppData\Local\Scan2Mesh\runs` verwendet. Auf anderen Betriebssystemen liegen die Ergebnisse unter `runs` im Repository.
 
-Der vollständige Ergebnisordner wird im integrierten Terminal ausgegeben. Dort liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen. Die ausgewählte Quelldatei bleibt an ihrem ursprünglichen Ort, auch wenn sie in einem OneDrive-Ordner liegt.
+Der im integrierten Terminal angezeigte Ausgabepfad ist zunächst der **Zielpfad**. Der Ordner `result` erscheint erst nach vollständiger Verarbeitung und Qualitätsprüfung; die Meldung **`Fertig: …`** bestätigt den erfolgreichen Abschluss. Während die Verarbeitung noch läuft, ist ein fehlender `result`-Ordner daher zunächst normal. Die Stufenmeldungen mit verstrichener Laufzeit zeigen den zuletzt begonnenen Schritt, keine Prozentanzeige oder geschätzte Restzeit. Große E57-Dateien werden vollständig geladen; das kann längere Rechenzeit und viel Arbeitsspeicher beanspruchen.
+
+Im fertigen Ergebnisordner liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen. Die ausgewählte Quelldatei bleibt an ihrem ursprünglichen Ort, auch wenn sie in einem OneDrive-Ordner liegt.
 
 VS Code und der Play-Start verwenden unter Windows automatisch die externe Python-Umgebung und den Cache unter `%LOCALAPPDATA%\Scan2Mesh\cache\uv`. Für die folgenden **optionalen Terminalbefehle** diese Pfade einmal pro PowerShell-Terminal setzen, damit auch `uv sync` und `uv run` dieselbe Umgebung verwenden:
 

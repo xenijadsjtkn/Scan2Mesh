@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import re
 import subprocess
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -58,7 +60,7 @@ def test_selected_unicode_path_is_passed_unchanged_to_processing(
     calls = []
     monkeypatch.setattr(desktop, "choose_scan_file", lambda: source)
 
-    def process(input_path, output, config):
+    def process(input_path, output, config, *, progress=None):
         calls.append((input_path, output, config))
         return {"counts": {"mesh_triangles": 1}}
 
@@ -91,7 +93,7 @@ def test_explicit_input_bypasses_picker_and_respects_units(
     calls = []
     monkeypatch.setattr(desktop, "choose_scan_file", forbid_processing)
 
-    def process(input_path, output, config):
+    def process(input_path, output, config, *, progress=None):
         calls.append(config)
         return {"counts": {"mesh_triangles": 1}}
 
@@ -114,7 +116,7 @@ def test_demo_is_explicit_and_uses_demo_parameters(
         generated.append(path)
         path.write_text("demo placeholder\n")
 
-    def process(input_path, output, config):
+    def process(input_path, output, config, *, progress=None):
         processed.append((input_path, output, config))
         return {"counts": {"mesh_triangles": 1}}
 
@@ -383,7 +385,7 @@ def test_custom_output_root_resolves_relative_to_caller(
     chosen_root = Path("Ergebnisse Ä") / ".." / "Eigene Ergebnisse"
     calls = []
 
-    def process(input_path, output, config):
+    def process(input_path, output, config, *, progress=None):
         calls.append(output)
         return {"counts": {"mesh_triangles": 1}}
 
@@ -422,3 +424,63 @@ def test_invalid_input_does_not_create_custom_output_root(
     assert error.value.code == 2
     assert not destination.exists()
     assert not runs_root.exists()
+
+
+def test_desktop_announces_deferred_output_and_forwards_timed_progress(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    source = tmp_path / "scan.ply"
+    source.write_text("placeholder\n")
+    invocation = []
+
+    def process(input_path, output, config, *, progress=None):
+        before_processing = capsys.readouterr().out
+        assert str(output) in before_processing
+        assert "Ergebnisordner" in before_processing and "Abschluss" in before_processing
+        assert not output.exists()
+        assert callable(progress)
+        progress("Testphase: Rekonstruktion")
+        invocation.append(output)
+        return {"counts": {"mesh_triangles": 1}}
+
+    stub_processing(monkeypatch, process)
+
+    result = desktop.main(["--input", str(source)])
+
+    assert invocation == [result]
+    after_processing = capsys.readouterr().out
+    progress_line = next(line for line in after_processing.splitlines() if "Testphase:" in line)
+    assert re.match(r"^\[\d+:\d+\]", progress_line)
+    assert after_processing.index("Testphase:") < after_processing.index("Fertig:")
+
+
+def test_progress_heartbeat_stops_its_thread_when_processing_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    heartbeat = threading.Event()
+    created_threads, lines = [], []
+    actual_thread = threading.Thread
+
+    def create_thread(*args, **kwargs):
+        thread = actual_thread(*args, **kwargs)
+        created_threads.append(thread)
+        return thread
+
+    def record(*values, **kwargs):
+        message = " ".join(map(str, values))
+        lines.append(message)
+        if "Warte auf Abschluss:" in message:
+            heartbeat.set()
+
+    monkeypatch.setattr(desktop, "Thread", create_thread)
+    monkeypatch.setattr(desktop, "print", record, raising=False)
+
+    with pytest.raises(RuntimeError, match="simulated processing failure"):
+        with desktop._ProgressPrinter(heartbeat_interval=0.01) as progress:
+            progress("Laden: Beispiel")
+            assert heartbeat.wait(timeout=2), "Expected a heartbeat while the processing stage is running"
+            raise RuntimeError("simulated processing failure")
+
+    assert created_threads
+    assert all(thread.daemon and not thread.is_alive() for thread in created_threads)
+    assert any("Warte auf Abschluss: Laden: Beispiel" in line for line in lines)

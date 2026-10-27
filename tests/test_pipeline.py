@@ -485,3 +485,46 @@ def test_pipeline_publication_failure_preserves_real_recoverable_results(
     assert len(mesh.triangles) == report["counts"]["mesh_triangles"] > 2_000
     assert len(cleaned.points) == len(segmented.points) == report["counts"]["cleaned_points"]
     assert report["input_path"] == str(sphere_path.resolve())
+
+
+@pytest.mark.parametrize("surface_mode", ["global", "segmented"])
+def test_progress_reports_real_stages_without_changing_results_or_printing(
+    tmp_path: Path, sphere_path: Path, capfd, surface_mode: str
+) -> None:
+    output = tmp_path / "with-progress"
+    events = []
+
+    def observe(message: str) -> None:
+        assert isinstance(message, str) and message
+        files = {path.name for path in output.iterdir()} if output.exists() else set()
+        events.append((message, output.exists(), files))
+
+    config = PipelineConfig(max_planes=0, surface_mode=surface_mode)
+    observed_report = run_pipeline(sphere_path, output, config, progress=observe)
+
+    required_files = {"mesh.ply", "cleaned.ply", "segments.ply", "report.json"}
+    if surface_mode == "segmented":
+        required_files.add("segmentation.npz")
+    position = -1
+    for prefix in (
+        "Laden:", "Rekonstruktion:", "Qualitaetspruefung:",
+        "Ergebnisse schreiben:", "Veroeffentlichen:", "Fertig:",
+    ):
+        matches = [
+            index for index, (message, _, _) in enumerate(events)
+            if index > position and message.startswith(prefix)
+        ]
+        assert matches, f"Missing or unordered progress stage {prefix}"
+        position = matches[0]
+    assert position == len(events) - 1
+    assert all(not exists for _, exists, _ in events[:-1])
+    assert events[-1][1] is True
+    assert events[-1][2] == required_files
+    assert json.loads((output / "report.json").read_text()) == observed_report
+    # A callback receives data; it must not cause the library to print by itself.
+    assert capfd.readouterr().out == ""
+
+    silent_report = run_pipeline(sphere_path, tmp_path / "without-progress", config)
+
+    assert capfd.readouterr().out == ""
+    assert silent_report == observed_report

@@ -11,6 +11,7 @@ import math
 import shutil
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -79,6 +80,11 @@ def _sample_rows(points: np.ndarray, limit: int, rng) -> np.ndarray:
     if len(points) <= limit:
         return points
     return points[rng.choice(len(points), limit, replace=False)]
+
+
+def _notify_progress(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
 
 
 def _publish_staged_results(staged: Path, output_dir: Path) -> None:
@@ -155,13 +161,15 @@ def _segment_planes(cloud, config, origin):
     return segmented, planes
 
 
-def _prepare_normals(cloud, radius):
+def _prepare_normals(cloud, radius, *, progress: Callable[[str], None] | None = None):
+    _notify_progress(progress, "Normalen: Oberflaechenrichtungen werden geschaetzt ...")
     cloud.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=50))
     points = np.asarray(cloud.points)
     covariance = np.cov(points.T)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
     if eigenvalues[1] <= np.finfo(float).eps * max(eigenvalues[-1], 1):
         raise ValueError("Point cloud is effectively a line; surface reconstruction needs 2D or 3D support")
+    _notify_progress(progress, "Normalen: Oberflaechenrichtungen werden ausgerichtet ...")
     if eigenvalues[0] <= eigenvalues[-1] * 1e-8:
         # Tangent-plane propagation uses a 3D Delaunay graph, undefined for an
         # exactly planar cloud. Orient its normals using the fitted plane instead.
@@ -214,17 +222,20 @@ def _reconstruct(cloud, config, nearest_distances, *, allow_empty=False):
     return mesh, radii, density_summary
 
 
-def _reconstruct_segmented(cloud, config, origin):
+def _reconstruct_segmented(cloud, config, origin, *, progress: Callable[[str], None] | None = None):
     from .segmentation import mesh_planar_patch, segment_planar_patches
 
+    _notify_progress(progress, "Segmentierung: Zusammenhaengende ebene Flaechen werden gesucht ...")
     labels, patches = segment_planar_patches(
         cloud, distance_threshold=config.plane_distance,
         max_planes=config.max_planes, min_points=config.min_plane_points, seed=config.seed,
     )
+    _notify_progress(progress, f"Segmentierung abgeschlossen: {len(patches)} Flaechenkandidaten.")
     accepted_labels = np.full(len(cloud.points), -1, dtype=np.int32)
     mesh = o3d.geometry.TriangleMesh()
     descriptions, diagnostics = [], []
-    for patch in patches:
+    for index, patch in enumerate(patches, start=1):
+        _notify_progress(progress, f"Planare Flaeche {index}/{len(patches)}: Lokale Dreiecke werden erzeugt ...")
         patch_mesh = mesh_planar_patch(cloud, patch)
         if not len(patch_mesh.triangles):
             diagnostics.append("A candidate planar patch had no supported triangles and remains unclassified.")
@@ -250,6 +261,7 @@ def _reconstruct_segmented(cloud, config, origin):
     radii, density_summary = [], None
     residual_triangles = 0
     if len(unknown) >= 3:
+        _notify_progress(progress, f"Restpunkte: {len(unknown)} unklassifizierte Punkte werden separat rekonstruiert ...")
         distances = np.asarray(residual.compute_nearest_neighbor_distance())
         residual_mesh, radii, density_summary = _reconstruct(
             residual, config, distances, allow_empty=True
@@ -318,19 +330,27 @@ def _quality(mesh, cleaned, original, seed):
     }
 
 
-def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> dict:
+def run_pipeline(
+    input_path: Path, output_dir: Path, config: PipelineConfig, *,
+    progress: Callable[[str], None] | None = None,
+) -> dict:
+    """Process a scan, optionally reporting actual stages without percentages."""
     input_path, output_dir = Path(input_path).resolve(), Path(output_dir).absolute()
     if output_dir.is_symlink() or (output_dir.exists() and (
         not output_dir.is_dir() or any(output_dir.iterdir())
     )):
         raise FileExistsError(f"Output must be a new or empty directory: {output_dir}")
     o3d.utility.random.seed(config.seed)
+    _notify_progress(progress, "Laden: Punktwolke wird eingelesen ...")
     cloud, import_info = load_cloud(input_path)
     counts = {"input_points": len(cloud.points)}
+    _notify_progress(progress, f"Laden abgeschlossen: {counts['input_points']} Punkte.")
+    _notify_progress(progress, "Bereinigung: Ungueltige Punkte werden entfernt ...")
     finite_indices = np.flatnonzero(np.isfinite(np.asarray(cloud.points)).all(axis=1))
     cloud = cloud.select_by_index(finite_indices.tolist())
     counts["finite_points"] = len(cloud.points)
     if config.crop is not None:
+        _notify_progress(progress, "Ausschnitt: Raeumlicher Bereich wird ausgewaehlt ...")
         cloud = cloud.crop(o3d.geometry.AxisAlignedBoundingBox(config.crop[:3], config.crop[3:]))
     counts["cropped_points"] = len(cloud.points)
     if len(cloud.points) < 30:
@@ -343,13 +363,16 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
     origin = np.median(np.asarray(cloud.points), axis=0)
     cloud.translate(-origin)
     original = copy.deepcopy(cloud)
+    _notify_progress(progress, "Bereinigung: Doppelte Punkte werden entfernt ...")
     cloud.remove_duplicated_points()
     counts["deduplicated_points"] = len(cloud.points)
     if config.voxel_size > 0:
+        _notify_progress(progress, "Voxelreduktion: Punktdichte wird reduziert ...")
         cloud = cloud.voxel_down_sample(config.voxel_size)
     counts["downsampled_points"] = len(cloud.points)
     if len(cloud.points) < 30:
         raise ValueError("Too few points remain after downsampling; reduce voxel_size")
+    _notify_progress(progress, "Ausreisser: Statistischer Nachbarschaftsfilter wird ausgefuehrt ...")
     cloud, _ = cloud.remove_statistical_outlier(
         nb_neighbors=min(config.outlier_neighbors, len(cloud.points) - 1),
         std_ratio=config.outlier_std_ratio,
@@ -358,18 +381,25 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
     counts["removed_outliers"] = counts["downsampled_points"] - counts["cleaned_points"]
     if len(cloud.points) < 30:
         raise ValueError("Too few points remain after outlier removal")
+    _notify_progress(progress, f"Bereinigung abgeschlossen: {counts['cleaned_points']} Punkte verbleiben.")
+    _notify_progress(progress, "Punktabstaende: Lokale Abtastung wird bestimmt ...")
     nearest = np.asarray(cloud.compute_nearest_neighbor_distance())
     spacing = float(np.median(nearest[nearest > 0]))
     if not math.isfinite(spacing) or spacing <= 0:
         raise ValueError("Could not determine positive point spacing")
     normal_radius = config.normal_radius or max(4 * spacing, 2 * config.voxel_size)
-    _prepare_normals(cloud, normal_radius)
+    _prepare_normals(cloud, normal_radius, progress=progress)
     segmentation_info, patch_ids = None, None
     if config.surface_mode == "segmented":
-        mesh, segmented, planes, segmentation_info, patch_ids, ball_radii, density_summary = _reconstruct_segmented(cloud, config, origin)
+        _notify_progress(progress, "Rekonstruktion: Segmentierte Verarbeitung startet ...")
+        mesh, segmented, planes, segmentation_info, patch_ids, ball_radii, density_summary = _reconstruct_segmented(cloud, config, origin, progress=progress)
     else:
+        _notify_progress(progress, "Rekonstruktion: Ebenen werden fuer die Darstellung erkannt ...")
         segmented, planes = _segment_planes(cloud, config, origin)
+        _notify_progress(progress, "Rekonstruktion: Globales Dreiecksmesh wird erzeugt ...")
         mesh, ball_radii, density_summary = _reconstruct(cloud, config, nearest)
+    _notify_progress(progress, f"Rekonstruktion abgeschlossen: {len(mesh.triangles)} Dreiecke.")
+    _notify_progress(progress, "Qualitaetspruefung: Abstaende und Mesh-Topologie werden ausgewertet ...")
     quality = _quality(mesh, cloud, original, config.seed)
     counts.update(mesh_vertices=len(mesh.vertices), mesh_triangles=len(mesh.triangles))
     report = {
@@ -390,6 +420,7 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
             "Already registered excerpts only; input is loaded in memory. No accuracy acceptance threshold is implied.",
         ],
     }
+    _notify_progress(progress, "Ergebnisse schreiben: Punktwolken, Mesh und Bericht werden gespeichert ...")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     # Publish results together. Incomplete writes are cleaned up, but complete
     # results survive publication failures (for example a Windows sync lock).
@@ -409,6 +440,7 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
             np.savez_compressed(staged / "segmentation.npz", patch_ids=patch_ids)
         (staged / "report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
         complete = True
+        _notify_progress(progress, "Veroeffentlichen: Vollstaendige Ergebnisse werden in den Zielordner verschoben ...")
         _publish_staged_results(staged, output_dir)
         published = True
     finally:
@@ -416,4 +448,5 @@ def run_pipeline(input_path: Path, output_dir: Path, config: PipelineConfig) -> 
             # Cleanup must not hide the original write failure or report a
             # failed run after results have already been published successfully.
             shutil.rmtree(temporary, ignore_errors=True)
+    _notify_progress(progress, f"Fertig: Ergebnisse gespeichert unter {output_dir}")
     return report

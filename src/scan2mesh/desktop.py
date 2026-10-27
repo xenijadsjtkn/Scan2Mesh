@@ -6,6 +6,48 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from threading import Event, Lock, Thread
+from time import monotonic
+
+
+class _ProgressPrinter:
+    """Show real stages and elapsed time, without claiming an estimated finish."""
+
+    def __init__(self, heartbeat_interval: float = 30.0):
+        self._interval = heartbeat_interval
+        self._started = monotonic()
+        self._last_update = self._started
+        self._message = "Verarbeitung startet"
+        self._stop = Event()
+        self._lock = Lock()
+        self._thread = Thread(target=self._heartbeat, name="scan2mesh-progress", daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._stop.set()
+        self._thread.join()
+
+    def _print(self, message: str, now: float) -> None:
+        elapsed = max(0, int(now - self._started))
+        minutes, seconds = divmod(elapsed, 60)
+        print(f"[{minutes:02d}:{seconds:02d}] {message}", flush=True)
+
+    def __call__(self, message: str) -> None:
+        with self._lock:
+            self._message = message
+            self._last_update = monotonic()
+            self._print(message, self._last_update)
+
+    def _heartbeat(self) -> None:
+        while not self._stop.wait(self._interval):
+            with self._lock:
+                now = monotonic()
+                if now - self._last_update >= self._interval:
+                    self._print(f"Warte auf Abschluss: {self._message}", now)
+
 
 def default_runs_root() -> Path:
     if sys.platform == "win32":
@@ -129,12 +171,14 @@ def main(argv=None):
     result = run_dir / "result"
     print(f"Eingabe: {source}", flush=True)
     print(f"Ausgabe: {result}", flush=True)
+    print("Der Ergebnisordner wird erst nach Abschluss der Verarbeitung und Qualitaetspruefung angelegt.", flush=True)
     print(f"Koordinateneinheit: {args.units}; Voxelgroesse: {config.voxel_size}", flush=True)
     print("Verarbeitung laeuft ...", flush=True)
     if args.surface_mode == "segmented":
         print("Vorschau: zusammenhaengende Ebenenbereiche, keine semantische Objekterkennung.", flush=True)
     try:
-        report = run_pipeline(source, result, config)
+        with _ProgressPrinter() as progress:
+            report = run_pipeline(source, result, config, progress=progress)
     except (ValueError, OSError, RuntimeError) as exc:
         parser.exit(2, f"Scan2Mesh: {exc}\n")
     print(f"Fertig: {report['counts']['mesh_triangles']} Dreiecke")
