@@ -22,7 +22,7 @@ Standard sind Koordinaten in Metern. Fuer Millimeter `-Units mm` an den Startbef
 
 - Alle eingelesenen Punkte gehen in NKSR ein. Vorhandene Normalen werden uebernommen. Nur wenn Normalen fehlen, werden sie mit Open3D geschaetzt und konsistent ausgerichtet.
 - Eine reversible Verschiebung des Koordinatenursprungs schuetzt die Float32-Genauigkeit. Millimeter werden fuer NKSR nach Metern umgerechnet. Der PLY-Export erhaelt die urspruenglichen Einheiten und Weltkoordinaten zurueck.
-- NKSR laeuft mit `cuda:0`, dem vortrainierten `ks`-Modell, `detail_level=0.0` und `extract_dual_mesh(mise_iter=1)`.
+- NKSR laeuft mit `cuda:0`, dem vortrainierten `ks`-Modell, `detail_level=1.0` (hoechste Detailstufe) und `extract_dual_mesh(mise_iter=1)`. Der Detailgrad steht beim Start im Terminal und anschliessend in `run.json`.
 - Die unveraenderten NKSR-Vertex- und Dreiecksarrays werden zuerst als `nksr_raw.npz` gesichert.
 - Bei RGB in der Quelle bekommt jeder Mesh-Eckpunkt die Farbe des naechstgelegenen Originalpunkts. Diese Zuordnung hat keinen Abstandsschwellwert und aendert keine Meshgeometrie. Es ist eine Vertexfaerbung, keine Bildtextur.
 - Ohne RGB wird ein farbloses Mesh geschrieben und darauf hingewiesen. Es werden keine Farben erfunden.
@@ -30,3 +30,5 @@ Standard sind Koordinaten in Metern. Fuer Millimeter `-Units mm` an den Startbef
 Die Ausgabe liegt jeweils in einem neuen `nksr-direkt-<Zeitstempel>-<Kennung>`-Ordner. Bei RGB heisst das Mesh `mesh_colored.ply`, sonst `mesh_raw.ply`. Den genauen Pfad zeigt das Terminal; nach Erfolg oeffnet sich der Windows-Explorer im Ausgabe-Stammordner. In CloudCompare gegebenenfalls RGB/Colors einschalten.
 
 Dieser Aufruf trainiert kein Modell und verwendet keine Scan2Mesh-Bewertungskriterien. Lese-, Schreib- und NKSR-Laufzeitfehler werden weiterhin angezeigt. Die Punktwolke wird vollstaendig geladen und ohne Chunking rekonstruiert; RAM und Grafikspeicher begrenzen auch diesen direkten Test. Mehr Punkte verbessern das Ergebnis nicht automatisch: Punktverteilung, Normalen und die Rekonstruktionsskala wirken ebenfalls darauf.
+
+Die hoechste Detailstufe benoetigt mehr Grafikspeicher und kann Messrauschen staerker rekonstruieren. Der Starter reduziert den Detailgrad bei Speichermangel nicht automatisch.

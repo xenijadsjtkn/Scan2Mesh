@@ -13,6 +13,9 @@ import time
 from uuid import uuid4
 
 
+DETAIL_LEVEL = 1.0
+
+
 def run(source: Path, output_root: Path, *, units: str = "m") -> Path:
     import numpy as np
     import open3d as o3d
@@ -60,9 +63,9 @@ def run(source: Path, output_root: Path, *, units: str = "m") -> Path:
     device = torch.device("cuda:0")
     xyz = torch.as_tensor(local_points * scale, dtype=torch.float32, device=device)
     normal = torch.as_tensor(np.asarray(cloud.normals), dtype=torch.float32, device=device)
-    status(f"NKSR auf {torch.cuda.get_device_name(0)}; alle {point_count} Punkte ...")
+    status(f"NKSR auf {torch.cuda.get_device_name(0)}; Detailstufe {DETAIL_LEVEL}; alle {point_count} Punkte ...")
     reconstructor = nksr.Reconstructor(device, config="ks")
-    field = reconstructor.reconstruct(xyz, normal, detail_level=0.0)
+    field = reconstructor.reconstruct(xyz, normal, detail_level=DETAIL_LEVEL)
     status("NKSR-Mesh extrahieren ...")
     extracted = field.extract_dual_mesh(mise_iter=1)
     vertices = extracted.v.detach().cpu().numpy()
@@ -101,7 +104,7 @@ def run(source: Path, output_root: Path, *, units: str = "m") -> Path:
         "input_path": str(source), "input_units": units,
         "input_units_to_meters": scale, "coordinate_origin": origin.tolist(),
         "input_points": point_count, "normal_source": normal_source,
-        "model": "ks", "detail_level": 0.0, "mise_iter": 1,
+        "model": "ks", "detail_level": DETAIL_LEVEL, "mise_iter": 1,
         "vertices": len(vertices), "triangles": len(triangles),
         "colors": "nearest original point" if has_colors else None,
         "mesh_path": str(mesh_path), "raw_path": str(raw_path),

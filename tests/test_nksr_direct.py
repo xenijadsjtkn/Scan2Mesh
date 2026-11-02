@@ -46,7 +46,7 @@ def fake_backend(monkeypatch):
             assert device == "cuda:0" and config == "ks"
 
         def reconstruct(self, xyz, normal, *, detail_level):
-            assert detail_level == 0.0
+            assert detail_level == 1.0
             calls.update(points=xyz.array.copy(), normals=normal.array.copy())
 
             class Field:
@@ -108,6 +108,7 @@ def test_direct_preserves_points_faces_normals_units_and_transfers_colors(
     assert info["input_points"] == len(points)
     assert info["normal_source"] == "provided"
     assert info["triangles"] == len(faces)
+    assert info["detail_level"] == 1.0
 
 
 def test_direct_propagates_native_nksr_error_without_fallback(tmp_path, fake_backend, monkeypatch):
