@@ -5,6 +5,9 @@ param(
     [string]$NksrPython = $env:SCAN2MESH_NKSR_PYTHON,
     [ValidateSet("m", "mm")]
     [string]$Units = "m",
+    [ValidateRange(0.0, 1.0)]
+    [double]$DetailLevel = 1.0,
+    [switch]$CompareTrim,
     [string]$OutputRoot = (Join-Path $env:LOCALAPPDATA "Scan2Mesh")
 )
 
@@ -75,7 +78,17 @@ try {
     Write-Host "Eingabe: $source"
     Write-Host "Koordinateneinheit: $Units"
     Write-Host "Direkter NKSR-Aufruf mit allen Originalpunkten."
-    & wsl.exe --distribution $WslDistro --exec $NksrPython -u $linuxRunner --input $linuxSource --output-root $linuxOutput --units $Units
+    $detailArgument = $DetailLevel.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $runnerArguments = @(
+        "-u", $linuxRunner, "--input", $linuxSource,
+        "--output-root", $linuxOutput, "--units", $Units,
+        "--detail-level", $detailArgument
+    )
+    if ($CompareTrim) {
+        $runnerArguments += "--compare-trim"
+        Write-Host "Vergleich: NKSR-Mesh mit und ohne interne Exportmaske."
+    }
+    & wsl.exe --distribution $WslDistro --exec $NksrPython @runnerArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Der direkte NKSR-Lauf ist fehlgeschlagen (Exitcode $LASTEXITCODE). Siehe Meldung oben."
     }

@@ -16,13 +16,19 @@ from uuid import uuid4
 DETAIL_LEVEL = 1.0
 
 
-def run(source: Path, output_root: Path, *, units: str = "m") -> Path:
+def run(
+    source: Path, output_root: Path, *, units: str = "m",
+    detail_level: float = DETAIL_LEVEL, compare_trim: bool = False,
+) -> Path:
     import numpy as np
     import open3d as o3d
     import torch
     import nksr
     from scipy.spatial import cKDTree
 
+    detail_level = float(detail_level)
+    if not 0.0 <= detail_level <= 1.0:
+        raise ValueError("detail_level muss zwischen 0 und 1 liegen")
     started = time.monotonic()
 
     def status(message):
@@ -63,56 +69,94 @@ def run(source: Path, output_root: Path, *, units: str = "m") -> Path:
     device = torch.device("cuda:0")
     xyz = torch.as_tensor(local_points * scale, dtype=torch.float32, device=device)
     normal = torch.as_tensor(np.asarray(cloud.normals), dtype=torch.float32, device=device)
-    status(f"NKSR auf {torch.cuda.get_device_name(0)}; Detailstufe {DETAIL_LEVEL}; alle {point_count} Punkte ...")
+    status(f"NKSR auf {torch.cuda.get_device_name(0)}; Detailstufe {detail_level}; alle {point_count} Punkte ...")
     reconstructor = nksr.Reconstructor(device, config="ks")
-    field = reconstructor.reconstruct(xyz, normal, detail_level=DETAIL_LEVEL)
-    status("NKSR-Mesh extrahieren ...")
-    extracted = field.extract_dual_mesh(mise_iter=1)
-    vertices = extracted.v.detach().cpu().numpy()
-    triangles = extracted.f.detach().cpu().numpy()
-
-    # Preserve exactly what NKSR returned before color transfer or PLY serialization.
-    raw_path = output / "nksr_raw.npz"
-    np.savez(
-        raw_path, vertices=vertices, triangles=triangles,
-        coordinate_origin=origin, input_units=np.asarray(units),
-        input_units_to_meters=np.asarray(scale), input_path=np.asarray(str(source)),
-    )
-    status(f"Rohdaten gesichert: {raw_path}")
-    result = o3d.geometry.TriangleMesh(
-        o3d.utility.Vector3dVector(vertices.astype(np.float64) / scale + origin),
-        o3d.utility.Vector3iVector(triangles),
-    )
-    if has_colors:
-        status("Originalfarben auf die Mesh-Eckpunkte uebertragen ...")
-        tree = cKDTree(local_points)
-        source_colors = np.asarray(cloud.colors)
-        colors = np.empty((len(vertices), 3), dtype=np.float64)
-        for start in range(0, len(vertices), 200_000):
-            stop = min(start + 200_000, len(vertices))
-            _, nearest = tree.query(vertices[start:stop].astype(np.float64) / scale, workers=1)
-            colors[start:stop] = source_colors[nearest]
-        result.vertex_colors = o3d.utility.Vector3dVector(colors)
-        mesh_path = output / "mesh_colored.ply"
-    else:
-        status("Die Quelldatei hat keine RGB-Farben; das Mesh wird ohne Farben gespeichert.")
-        mesh_path = output / "mesh_raw.ply"
-
-    if not o3d.io.write_triangle_mesh(str(mesh_path), result, write_vertex_colors=True):
-        raise OSError(f"PLY konnte nicht geschrieben werden. NKSR-Rohdaten stehen in: {raw_path}")
+    field = reconstructor.reconstruct(xyz, normal, detail_level=detail_level)
     run_info = {
         "input_path": str(source), "input_units": units,
         "input_units_to_meters": scale, "coordinate_origin": origin.tolist(),
         "input_points": point_count, "normal_source": normal_source,
-        "model": "ks", "detail_level": DETAIL_LEVEL, "mise_iter": 1,
-        "vertices": len(vertices), "triangles": len(triangles),
+        "model": "ks", "detail_level": detail_level, "mise_iter": 1,
+        "compare_trim": compare_trim,
         "colors": "nearest original point" if has_colors else None,
-        "mesh_path": str(mesh_path), "raw_path": str(raw_path),
+        "exports": [],
     }
-    (output / "run.json").write_text(json.dumps(run_info, indent=2), encoding="utf-8")
-    status(f"Fertig: {len(vertices)} Eckpunkte, {len(triangles)} Dreiecke.")
-    print(f"Mesh: {mesh_path}", flush=True)
-    return mesh_path
+    tree = None
+
+    def export_mesh(*, trim: bool, suffix: str) -> dict:
+        nonlocal tree
+        status(f"NKSR-Mesh extrahieren (trim={trim}) ...")
+        extracted = field.extract_dual_mesh(mise_iter=1, trim=trim)
+        vertices = extracted.v.detach().cpu().numpy()
+        triangles = extracted.f.detach().cpu().numpy()
+        # Drop this GPU mesh before coloring and before extracting the next one.
+        del extracted
+
+        # Preserve each raw result before color transfer or PLY serialization.
+        raw_path = output / f"nksr_raw{suffix}.npz"
+        np.savez(
+            raw_path, vertices=vertices, triangles=triangles,
+            coordinate_origin=origin, input_units=np.asarray(units),
+            input_units_to_meters=np.asarray(scale), input_path=np.asarray(str(source)),
+            trim=np.asarray(trim), detail_level=np.asarray(detail_level),
+        )
+        status(f"Rohdaten gesichert: {raw_path}")
+        result = o3d.geometry.TriangleMesh(
+            o3d.utility.Vector3dVector(vertices.astype(np.float64) / scale + origin),
+            o3d.utility.Vector3iVector(triangles),
+        )
+        if has_colors:
+            status("Originalfarben auf die Mesh-Eckpunkte uebertragen ...")
+            if tree is None:
+                tree = cKDTree(local_points)
+            source_colors = np.asarray(cloud.colors)
+            colors = np.empty((len(vertices), 3), dtype=np.float64)
+            for start in range(0, len(vertices), 200_000):
+                stop = min(start + 200_000, len(vertices))
+                _, nearest = tree.query(vertices[start:stop].astype(np.float64) / scale, workers=1)
+                colors[start:stop] = source_colors[nearest]
+            result.vertex_colors = o3d.utility.Vector3dVector(colors)
+            mesh_path = output / f"mesh_colored{suffix}.ply"
+        else:
+            status("Die Quelldatei hat keine RGB-Farben; das Mesh wird ohne Farben gespeichert.")
+            mesh_path = output / f"mesh_raw{suffix}.ply"
+
+        if not o3d.io.write_triangle_mesh(str(mesh_path), result, write_vertex_colors=True):
+            raise OSError(f"PLY konnte nicht geschrieben werden. NKSR-Rohdaten stehen in: {raw_path}")
+        export_info = {
+            "trim": trim, "vertices": len(vertices), "triangles": len(triangles),
+            "mesh_path": str(mesh_path), "raw_path": str(raw_path),
+        }
+        # The caller keeps metadata only; CPU mesh arrays leave scope here.
+        return export_info
+
+    def record_export(export_info):
+        run_info["exports"].append(export_info)
+        if len(run_info["exports"]) == 1:
+            # Keep existing readers of the primary mesh's metadata compatible.
+            run_info.update(export_info)
+        temporary_info = output / "run.json.tmp"
+        temporary_info.write_text(json.dumps(run_info, indent=2), encoding="utf-8")
+        temporary_info.replace(output / "run.json")
+        status(f"Exportiert: {export_info['vertices']} Eckpunkte, {export_info['triangles']} Dreiecke.")
+        print(f"Mesh (trim={export_info['trim']}): {export_info['mesh_path']}", flush=True)
+
+    primary = export_mesh(trim=True, suffix="")
+    record_export(primary)
+    if compare_trim:
+        record_export(export_mesh(trim=False, suffix="_untrimmed"))
+    status("Fertig.")
+    return Path(primary["mesh_path"])
+
+
+def _detail_level_argument(value):
+    try:
+        level = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Detailstufe muss eine Zahl zwischen 0 und 1 sein") from exc
+    if not 0.0 <= level <= 1.0:
+        raise argparse.ArgumentTypeError("Detailstufe muss zwischen 0 und 1 liegen")
+    return level
 
 
 def main(argv=None):
@@ -120,8 +164,13 @@ def main(argv=None):
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
     parser.add_argument("--units", choices=("m", "mm"), default="m")
+    parser.add_argument("--detail-level", type=_detail_level_argument, default=DETAIL_LEVEL)
+    parser.add_argument("--compare-trim", action="store_true", help="Beide NKSR-Exporte mit und ohne Maskierung speichern")
     args = parser.parse_args(argv)
-    return run(args.input, args.output_root, units=args.units)
+    return run(
+        args.input, args.output_root, units=args.units,
+        detail_level=args.detail_level, compare_trim=args.compare_trim,
+    )
 
 
 if __name__ == "__main__":

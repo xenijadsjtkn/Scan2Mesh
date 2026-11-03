@@ -46,13 +46,17 @@ def fake_backend(monkeypatch):
             assert device == "cuda:0" and config == "ks"
 
         def reconstruct(self, xyz, normal, *, detail_level):
-            assert detail_level == 1.0
             calls.update(points=xyz.array.copy(), normals=normal.array.copy())
+            calls.setdefault("reconstruction_calls", []).append(detail_level)
 
             class Field:
-                def extract_dual_mesh(self, *, mise_iter):
+                def extract_dual_mesh(self, *, mise_iter, trim):
                     assert mise_iter == 1
-                    return SimpleNamespace(v=Tensor(xyz.array), f=Tensor(faces))
+                    calls.setdefault("extraction_calls", []).append(trim)
+                    if not trim and calls.get("fail_untrimmed"):
+                        raise RuntimeError("test: untrimmed extraction failed")
+                    output_faces = faces if trim else np.vstack((faces, [0, 2, 3]))
+                    return SimpleNamespace(v=Tensor(xyz.array), f=Tensor(output_faces))
 
             return Field()
 
@@ -109,6 +113,134 @@ def test_direct_preserves_points_faces_normals_units_and_transfers_colors(
     assert info["normal_source"] == "provided"
     assert info["triangles"] == len(faces)
     assert info["detail_level"] == 1.0
+    assert calls["reconstruction_calls"] == [1.0]
+    assert calls["extraction_calls"] == [True]
+    assert info["trim"] is True
+    assert info["compare_trim"] is False
+    assert info["exports"] == [{
+        "trim": True, "vertices": len(points), "triangles": len(faces),
+        "mesh_path": str(output_path), "raw_path": str(output_path.parent / "nksr_raw.npz"),
+    }]
+
+
+@pytest.mark.parametrize("units,scale", [("m", 1.0), ("mm", 1000.0)])
+@pytest.mark.parametrize("colored", [True, False])
+def test_trim_comparison_uses_one_field_and_exports_both_raw_meshes(
+    tmp_path, fake_backend, units, scale, colored,
+):
+    calls, trimmed_faces = fake_backend
+    world = (np.eye(4, 3) + [450_000.0, 5_800_000.0, 120.0]) * scale
+    normals = np.array([[0., 0., 2.], [2., 0., 0.], [0., -3., 0.], [0., 0., 4.]])
+    colors = np.array([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [1., 1., 1.]])
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(world))
+    cloud.normals = o3d.utility.Vector3dVector(normals)
+    if colored:
+        cloud.colors = o3d.utility.Vector3dVector(colors)
+    source = tmp_path / "comparison.ply"
+    assert o3d.io.write_point_cloud(str(source), cloud)
+    source_bytes = source.read_bytes()
+
+    primary = direct.main([
+        "--input", str(source), "--output-root", str(tmp_path / "runs"),
+        "--units", units, "--detail-level", "0.5", "--compare-trim",
+    ])
+
+    assert calls["reconstruction_calls"] == [0.5]
+    assert calls["extraction_calls"] == [True, False]
+    np.testing.assert_array_equal(calls["normals"], normals.astype(np.float32))
+    info = json.loads((primary.parent / "run.json").read_text())
+    assert info["detail_level"] == 0.5
+    assert info["compare_trim"] is True
+    assert info["mesh_path"] == str(primary)
+    assert [entry["trim"] for entry in info["exports"]] == [True, False]
+    assert [entry["triangles"] for entry in info["exports"]] == [2, 3]
+    untrimmed_faces = np.vstack((trimmed_faces, [0, 2, 3]))
+    for entry, expected_faces, suffix in zip(
+        info["exports"], (trimmed_faces, untrimmed_faces), ("", "_untrimmed")
+    ):
+        mesh_path = Path(entry["mesh_path"])
+        expected_stem = "mesh_colored" if colored else "mesh_raw"
+        assert mesh_path.name == f"{expected_stem}{suffix}.ply"
+        with np.load(entry["raw_path"], allow_pickle=False) as raw:
+            np.testing.assert_array_equal(raw["vertices"], calls["points"])
+            np.testing.assert_array_equal(raw["triangles"], expected_faces)
+            assert raw["trim"].item() == entry["trim"]
+            assert raw["detail_level"].item() == 0.5
+        mesh = o3d.io.read_triangle_mesh(str(mesh_path))
+        np.testing.assert_array_equal(np.asarray(mesh.vertices), world)
+        np.testing.assert_array_equal(np.asarray(mesh.triangles), expected_faces)
+        assert mesh.has_vertex_colors() == colored
+        if colored:
+            np.testing.assert_array_equal(np.asarray(mesh.vertex_colors), colors)
+    assert source.read_bytes() == source_bytes
+
+
+def test_primary_mesh_and_metadata_survive_untrimmed_extraction_failure(tmp_path, fake_backend):
+    calls, faces = fake_backend
+    calls["fail_untrimmed"] = True
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.eye(4, 3)))
+    cloud.normals = o3d.utility.Vector3dVector(np.ones((4, 3)))
+    source = tmp_path / "scan.ply"
+    assert o3d.io.write_point_cloud(str(source), cloud)
+
+    with pytest.raises(RuntimeError, match="untrimmed extraction failed"):
+        direct.run(source, tmp_path / "runs", compare_trim=True)
+
+    primary_paths = list((tmp_path / "runs").rglob("mesh_raw.ply"))
+    assert len(primary_paths) == 1
+    np.testing.assert_array_equal(
+        np.asarray(o3d.io.read_triangle_mesh(str(primary_paths[0])).triangles), faces
+    )
+    info = json.loads((primary_paths[0].parent / "run.json").read_text())
+    assert info["compare_trim"] is True
+    assert len(info["exports"]) == 1
+    assert info["exports"][0]["trim"] is True
+    assert Path(info["exports"][0]["raw_path"]).is_file()
+    assert calls["reconstruction_calls"] == [1.0]
+    assert calls["extraction_calls"] == [True, False]
+
+
+def test_primary_report_survives_partial_write_of_second_report(tmp_path, fake_backend, monkeypatch):
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.eye(4, 3)))
+    cloud.normals = o3d.utility.Vector3dVector(np.ones((4, 3)))
+    source = tmp_path / "scan.ply"
+    assert o3d.io.write_point_cloud(str(source), cloud)
+    original_write = Path.write_text
+    report_writes = 0
+
+    def partial_write(path, text, *args, **kwargs):
+        nonlocal report_writes
+        if path.name == "run.json.tmp":
+            report_writes += 1
+            if report_writes == 2:
+                original_write(path, text[:10], *args, **kwargs)
+                raise OSError("test: second report write failed")
+        return original_write(path, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", partial_write)
+    with pytest.raises(OSError, match="second report write failed"):
+        direct.run(source, tmp_path / "runs", compare_trim=True)
+
+    reports = list((tmp_path / "runs").rglob("run.json"))
+    assert len(reports) == 1
+    info = json.loads(reports[0].read_text())
+    assert len(info["exports"]) == 1
+    assert info["exports"][0]["trim"] is True
+    assert Path(info["mesh_path"]).is_file()
+    assert Path(info["raw_path"]).is_file()
+    assert (reports[0].parent / "mesh_raw_untrimmed.ply").is_file()
+    assert (reports[0].parent / "nksr_raw_untrimmed.npz").is_file()
+
+
+@pytest.mark.parametrize("detail", ["-0.1", "1.1", "nan", "inf", "invalid"])
+def test_cli_rejects_invalid_detail_before_reading_input(tmp_path, detail):
+    with pytest.raises(SystemExit) as error:
+        direct.main([
+            "--input", str(tmp_path / "missing.ply"), "--output-root", str(tmp_path / "runs"),
+            "--detail-level", detail,
+        ])
+    assert error.value.code == 2
+    assert not (tmp_path / "runs").exists()
 
 
 def test_direct_propagates_native_nksr_error_without_fallback(tmp_path, fake_backend, monkeypatch):
