@@ -131,6 +131,7 @@ def main(argv=None):
     source_args.add_argument("--input", type=Path, help="Datei direkt verarbeiten, ohne Auswahldialog")
     source_args.add_argument("--demo", action="store_true", help="Synthetische Demo statt eigener Datei")
     parser.add_argument("--units", choices=["m", "mm"], default="m", help="Eingabekoordinaten; Standard: Meter")
+    parser.add_argument("--voxel-size", type=float, help="Voxelgroesse in Eingabeeinheiten; 0 erhaelt die volle Punktaufloesung (Standard fuer eigene Scans; Demo: 0.025 m)")
     parser.add_argument("--output-root", type=Path, help="Speicherort fuer neue Ergebnisordner; Windows-Standard: LOCALAPPDATA/Scan2Mesh/runs")
     parser.add_argument("--surface-mode", choices=["global", "segmented"], default="global", help="Segmentierte Rekonstruktion als geometrische Vorschau")
     args = parser.parse_args(argv)
@@ -155,6 +156,17 @@ def main(argv=None):
     from .demo import generate_demo
     from .pipeline import PipelineConfig, run_pipeline
 
+    scale = 1 if args.units == "m" else 1_000
+    try:
+        config = PipelineConfig(
+            voxel_size=args.voxel_size if args.voxel_size is not None else (0.025 if args.demo else 0.0),
+            plane_distance=0.015 if args.demo else 0.01 * scale,
+            surface_mode=args.surface_mode,
+            max_planes=8 if args.surface_mode == "segmented" else 3,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
     runs_root = args.output_root.expanduser().resolve() if args.output_root is not None else RUNS_ROOT
     try:
         runs_root.mkdir(parents=True, exist_ok=True)
@@ -164,15 +176,13 @@ def main(argv=None):
     if args.demo:
         source = run_dir / "demo.ply"
         generate_demo(source)
-        config = PipelineConfig(voxel_size=0.025, plane_distance=0.015, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
-    else:
-        scale = 1 if args.units == "m" else 1_000
-        config = PipelineConfig(voxel_size=0.01 * scale, plane_distance=0.01 * scale, surface_mode=args.surface_mode, max_planes=8 if args.surface_mode == "segmented" else 3)
     result = run_dir / "result"
     print(f"Eingabe: {source}", flush=True)
     print(f"Ausgabe: {result}", flush=True)
     print("Der Ergebnisordner wird erst nach Abschluss der Verarbeitung und Qualitaetspruefung angelegt.", flush=True)
     print(f"Koordinateneinheit: {args.units}; Voxelgroesse: {config.voxel_size}", flush=True)
+    if config.voxel_size == 0:
+        print("Detailstufe: volle Punktaufloesung, keine Voxelreduktion.", flush=True)
     print("Verarbeitung laeuft ...", flush=True)
     if args.surface_mode == "segmented":
         print("Vorschau: zusammenhaengende Ebenenbereiche, keine semantische Objekterkennung.", flush=True)

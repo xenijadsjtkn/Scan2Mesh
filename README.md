@@ -39,13 +39,23 @@ uv run python main.py --output-root "D:\Scan2Mesh-Ergebnisse"
 
 Auch dieser Start öffnet die Dateiauswahl und erzeugt anschließend einen neuen Ergebnisordner am gewählten Speicherort. Falls die Ausgabe abschließend nicht in den Ergebnisordner übernommen werden kann, bleiben fertig geschriebene Dateien am im Terminal genannten Wiederherstellungspfad erhalten.
 
-Der einfache Start geht von **Koordinaten in Metern** aus, wie bei einem üblichen E57-Export. Einheiten werden nicht automatisch erkannt. Voxelgröße und Ebenentoleranz sind zunächst auf einen Zentimeter eingestellt. Für eine Punktwolke mit Millimeterkoordinaten im Terminal stattdessen starten:
+Der einfache Start geht von **Koordinaten in Metern** aus, wie bei einem üblichen E57-Export. Einheiten werden nicht automatisch erkannt. **Eigene Scans werden beim Play-/F5-Start standardmäßig in voller Punktauflösung verarbeitet (`voxel_size=0`), ohne Voxelreduktion.** Damit entfällt die bisherige Reduktion auf ein Zentimeter-Raster, die feine Strukturen entfernen konnte. Die Ebenentoleranz beträgt weiterhin einen Zentimeter; im globalen Modus beeinflusst sie nur die Ebenenmarkierung, nicht die Meshauflösung. Für eine Punktwolke mit Millimeterkoordinaten im Terminal stattdessen starten:
 
 ```powershell
 uv run python main.py --units mm
 ```
 
-Auch dabei öffnet sich die Dateiauswahl; die Verarbeitungsschwellen werden an Millimeterkoordinaten angepasst. Für feine Bauteile müssen diese Ausgangswerte gegebenenfalls weiter angepasst werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
+Auch dabei öffnet sich die Dateiauswahl; die Ebenentoleranz wird an Millimeterkoordinaten angepasst, die Voxelreduktion bleibt deaktiviert.
+
+Für ein möglichst sauberes Mesh bleiben die Entfernung ungültiger und doppelter Punkte, der statistische Ausreißerfilter (20 Nachbarn, Standardabweichungsfaktor 2.0) sowie die Entfernung doppelter und degenerierter Dreiecke und unreferenzierter Meshknoten aktiv. Normalen- und Ball-Pivoting-Radien werden aus den Punktabständen abgeleitet. Die globale Ball-Pivoting-Rekonstruktion erhält die gemessene Detailbasis ohne zusätzliche Glättung oder Meshvereinfachung. Volle Punktauflösung kann Rauschen enthalten; sie garantiert kein fehlerfreies oder geschlossenes Mesh. Die Qualitätsprüfung dokumentiert weiterhin Abstände und Topologiekennzahlen in `report.json`.
+
+Die Verarbeitung mit voller Punktauflösung kann deutlich mehr Laufzeit und Arbeitsspeicher benötigen. Falls eine bewusste Reduktion nötig ist, lässt sich die Voxelgröße explizit setzen, beispielsweise auf 2 mm bei Meterkoordinaten:
+
+```powershell
+uv run python main.py --voxel-size 0.002
+```
+
+`--voxel-size` verwendet die Eingabeeinheiten; bei `--units mm` entspricht `--voxel-size 2` ebenfalls 2 mm. `--voxel-size 0` deaktiviert die Reduktion ausdrücklich. Die synthetische Demo behält ihren bisherigen Standard von 0.025 m bei; der Parameter kann auch dort überschrieben werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
 
 Die alternative Startkonfiguration **Scan2Mesh: Demo** erzeugt und verarbeitet eine synthetische Industrieszene. Sie lässt sich auch mit `uv run python main.py --demo` starten. Ohne Dateiauswahl ist ein Start mit `uv run python main.py --input "C:\Scans\halle.e57"` möglich.
 

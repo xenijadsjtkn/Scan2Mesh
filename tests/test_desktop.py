@@ -76,7 +76,7 @@ def test_selected_unicode_path_is_passed_unchanged_to_processing(
     assert result.parent.parent == runs_root
     assert result.parent.name.startswith("vscode-scan-")
     assert result.name == "result"
-    assert config.voxel_size == 0.01
+    assert config.voxel_size == 0.0
     assert config.plane_distance == 0.01
 
 
@@ -102,8 +102,44 @@ def test_explicit_input_bypasses_picker_and_respects_units(
     desktop.main(["--input", str(source), "--units", units])
 
     assert len(calls) == 1
-    assert calls[0].voxel_size == expected_scale
+    assert calls[0].voxel_size == 0.0
     assert calls[0].plane_distance == expected_scale
+
+
+@pytest.mark.parametrize("units, voxel_size", [("m", "0.002"), ("mm", "2"), ("m", "0")])
+def test_explicit_voxel_size_uses_input_units(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch,
+    units: str, voxel_size: str,
+) -> None:
+    source = tmp_path / "scan.ply"
+    source.write_text("placeholder\n")
+    calls = []
+
+    def process(input_path, output, config, *, progress=None):
+        calls.append(config)
+        return {"counts": {"mesh_triangles": 1}}
+
+    stub_processing(monkeypatch, process)
+
+    desktop.main(["--input", str(source), "--units", units, "--voxel-size", voxel_size])
+
+    assert len(calls) == 1
+    assert calls[0].voxel_size == float(voxel_size)
+
+
+@pytest.mark.parametrize("voxel_size", ["-0.01", "nan", "inf"])
+def test_invalid_voxel_size_does_not_create_run(
+    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch, voxel_size: str,
+) -> None:
+    source = tmp_path / "scan.ply"
+    source.write_text("placeholder\n")
+    stub_processing(monkeypatch, forbid_processing)
+
+    with pytest.raises(SystemExit) as error:
+        desktop.main(["--input", str(source), "--voxel-size", voxel_size])
+
+    assert error.value.code == 2
+    assert not runs_root.exists()
 
 
 def test_demo_is_explicit_and_uses_demo_parameters(
