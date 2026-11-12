@@ -26,16 +26,6 @@ Die vorhandene NKSR-Installation unter Linux beziehungsweise WSL wird weiterverw
 
 Im Terminal erscheint **„NKSR direkt: Modell ks, Detailstufe 1.0, alle Originalpunkte.“** Anschließend zeigt NKSR die Verarbeitungsstufen und den Ausgabepfad. Für diesen Standardlauf sind keine Detail-, Filter- oder Vergleichsparameter erforderlich.
 
-### Falls Play versucht, den Ordner `.venv` auszuführen
-
-Über **Strg+Umschalt+P → Python: Select Interpreter → Enter interpreter path** die Datei **`%LOCALAPPDATA%\Scan2Mesh\venv\Scripts\python.exe`** auswählen. Der Interpreter muss eine ausführbare Python-Datei sein. Eine bereits gespeicherte Auswahl wird durch Änderungen am Repository nicht automatisch ersetzt; siehe [VS-Code-Einstellungen](https://code.visualstudio.com/docs/python/settings-reference#general-python-settings).
-
-Der direkte Start aus dem PowerShell-Terminal des Projekts funktioniert unabhängig von dieser Auswahl:
-
-```powershell
-& "$env:LOCALAPPDATA\Scan2Mesh\venv\Scripts\python.exe" .\main.py
-```
-
 ## Vorhandene NKSR-Umgebung
 
 Unter Windows verwendet der Start WSL, standardmäßig die Distribution **Ubuntu-22.04**. Eine ausdrücklich gesetzte Option oder Umgebungsvariable hat Vorrang:
@@ -95,15 +85,12 @@ Unter Windows liegt jeder Lauf in einem neuen Ordner unter **`%LOCALAPPDATA%\Sca
 | `nksr_raw.npz` | Unveränderte Vertex- und Dreiecksarrays des maskierten NKSR-Exports samt Koordinatenmetadaten |
 | `nksr_raw_untrimmed.npz` | Entsprechende Roharrays des unmaskierten Exports |
 | `run.json` | Eingabe, Punktzahl, Einheiten, Normalenherkunft, Modell, Detailstufe und beide Exporte mit ihren Zählwerten und Pfaden |
-| `cuda_diagnostics.json` | GPU-Name, PyTorch-/CUDA-Versionen und Speicherwerte beim Start, vor dem Punkttransfer und bei einem CUDA-Transferfehler |
 
 Wenn die Quelle keine RGB-Farben besitzt, heißen die PLY-Dateien stattdessen `mesh_raw.ply` und `mesh_raw_untrimmed.ply`. Zum Ansehen CloudCompare oder MeshLab verwenden und vorhandene RGB-Farben einschalten.
 
 Der Ablauf entfernt keine Punkte, filtert keine Ausreißer, segmentiert keine Flächen und bereinigt oder vereinfacht das NKSR-Mesh nicht nachträglich. Vorhandene Normalen werden übernommen; fehlende Normalen werden mit Open3D geschätzt und konsistent ausgerichtet. Die Einzelheiten einschließlich Farbübertragung und Maskenvergleich stehen in [NKSR-Direktlauf](docs/nksr-direct.md).
 
 Die Punktwolke wird vollständig geladen und ohne Chunking rekonstruiert. RAM und GPU-Speicher begrenzen die verarbeitbare Größe. Bei Speichermangel oder NKSR-Fehlern wird der Lauf mit einer Fehlermeldung beendet; es erfolgt kein automatischer Wechsel des Verfahrens oder der Detailstufe. Bereits geschriebene Rohdaten und Exporte bleiben erhalten. Höchste Detailstufe garantiert kein rauschfreies oder geschlossenes Mesh; Originalpunkte, feine Bauteile und echte Öffnungen weiterhin vergleichen.
-
-Bei einem CUDA-Fehler schon beim Übertragen der Punkte zuerst die ausgegebene GPU-Diagnose prüfen. `nvidia-smi` nach dem Abbruch zeigt den späteren Zustand; daraus lässt sich die Belegung zum Fehlerzeitpunkt nicht sicher ableiten. Schlägt der Transfer vor der Rekonstruktion fehl, liegt noch keine `run.json` mit Mesh-Ergebnissen vor. Die zusätzlichen Diagnosen ändern weder Originalpunkte noch Detailstufe oder Rekonstruktionsverfahren.
 
 Die älteren Module für Ball Pivoting, Poisson und geometrische Segmentierung bleiben als Vergleichscode im Repository; die normalen Programmstarts rufen sie nicht auf. Die automatisierten Tests prüfen unter anderem Startweiterleitung und den Exportvertrag mit einem nachgebildeten NKSR-Backend. Eine echte GPU-Rekonstruktion benötigt die eingerichtete Linux-/WSL-Umgebung.
 

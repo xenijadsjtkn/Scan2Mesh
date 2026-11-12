@@ -70,60 +70,6 @@ def run(
     )
     output.mkdir(parents=True, exist_ok=False)
     print(f"Eingabe: {source}\nAusgabe: {output}\nKoordinateneinheit: {units}", flush=True)
-    diagnostic_path = output / "cuda_diagnostics.json"
-    diagnostic_snapshots = []
-
-    def cuda_snapshot(stage, *, point_count=None, error=None):
-        """Record available CUDA evidence without masking a reconstruction error."""
-        unavailable = {}
-
-        def read_metric(name, callback):
-            try:
-                return callback()
-            except Exception as exc:
-                unavailable[name] = f"{type(exc).__name__}: {exc}"
-                return None
-
-        torch_version = read_metric("torch_version", lambda: str(torch.__version__))
-        build_cuda = read_metric("torch_build_cuda", lambda: torch.version.cuda)
-        gpu_name = read_metric("gpu_name", lambda: torch.cuda.get_device_name(0))
-        memory = read_metric("free_total_bytes", lambda: torch.cuda.mem_get_info(0))
-        allocated = read_metric("allocated_bytes", lambda: torch.cuda.memory_allocated(0))
-        reserved = read_metric("reserved_bytes", lambda: torch.cuda.memory_reserved(0))
-        free, total = memory if memory is not None else (None, None)
-        payload = point_count * 3 * 4 if point_count is not None else None
-        snapshot = {
-            "stage": stage, "elapsed_seconds": round(time.monotonic() - started, 3),
-            "device": "cuda:0", "torch_version": torch_version,
-            "torch_build_cuda": build_cuda, "gpu_name": gpu_name,
-            "free_bytes": free, "total_bytes": total,
-            "allocated_bytes": allocated, "reserved_bytes": reserved,
-            "input_points": point_count, "xyz_bytes": payload,
-            "normal_bytes": payload,
-            "total_input_tensor_bytes": 2 * payload if payload is not None else None,
-            "unavailable": unavailable,
-        }
-        if error is not None:
-            snapshot["error"] = f"{type(error).__name__}: {error}"
-        diagnostic_snapshots.append(snapshot)
-
-        def mib(value):
-            return f"{value / 2**20:.2f} MiB" if value is not None else "nicht verfuegbar"
-
-        status(f"CUDA-Diagnose [{stage}]: PyTorch {torch_version or 'nicht verfuegbar'}; Build-CUDA {build_cuda or 'nicht verfuegbar'}; GPU {gpu_name or 'nicht verfuegbar'}.")
-        status(f"CUDA-Speicher [{stage}]: frei {mib(free)} / gesamt {mib(total)}; PyTorch belegt {mib(allocated)}, reserviert {mib(reserved)}.")
-        for name, reason in unavailable.items():
-            status(f"CUDA-Diagnose: {name} nicht verfuegbar ({reason}).")
-        try:
-            temporary = output / "cuda_diagnostics.json.tmp"
-            temporary.write_text(json.dumps({"snapshots": diagnostic_snapshots}, indent=2), encoding="utf-8")
-            temporary.replace(diagnostic_path)
-            return True
-        except Exception as exc:
-            status(f"CUDA-Diagnose konnte nicht gespeichert werden: {diagnostic_path}: {exc}")
-            return False
-
-    cuda_snapshot("startup")
     status("Originalpunktwolke laden ...")
     cloud = o3d.io.read_point_cloud(str(source))
     if not len(cloud.points):
@@ -148,25 +94,8 @@ def run(
         cloud.orient_normals_consistent_tangent_plane(min(30, point_count - 1))
 
     device = torch.device("cuda:0")
-    cuda_snapshot("before_upload", point_count=point_count)
-    upload_stage = "upload_positions"
-    try:
-        xyz = torch.as_tensor(local_points * scale, dtype=torch.float32, device=device)
-        upload_stage = "upload_normals"
-        normal = torch.as_tensor(np.asarray(cloud.normals), dtype=torch.float32, device=device)
-    except RuntimeError as exc:
-        # Shape/type errors unrelated to CUDA retain their original exception.
-        reason = str(exc).lower()
-        oom_type = getattr(torch.cuda, "OutOfMemoryError", None)
-        is_oom = isinstance(oom_type, type) and isinstance(exc, oom_type)
-        if not is_oom and "cuda" not in reason and "out of memory" not in reason:
-            raise
-        saved = cuda_snapshot(f"{upload_stage}_failed", point_count=point_count, error=exc)
-        diagnostic_note = (
-            f"CUDA-Diagnose: {diagnostic_path}"
-            if saved else f"CUDA-Diagnose konnte nicht gespeichert werden: {diagnostic_path}"
-        )
-        raise RuntimeError(f"{exc}\nFehler beim GPU-Punkttransfer ({upload_stage}). {diagnostic_note}") from exc
+    xyz = torch.as_tensor(local_points * scale, dtype=torch.float32, device=device)
+    normal = torch.as_tensor(np.asarray(cloud.normals), dtype=torch.float32, device=device)
     status(f"NKSR auf {torch.cuda.get_device_name(0)}; Detailstufe {detail_level}; alle {point_count} Punkte ...")
     reconstructor = nksr.Reconstructor(device, config="ks")
     field = reconstructor.reconstruct(xyz, normal, detail_level=detail_level)
