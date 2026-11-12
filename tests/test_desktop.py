@@ -1,224 +1,125 @@
-"""Desktop-start behavior without opening a real GUI or executing PowerShell."""
+"""Default launch, cancellation and Windows bootstrap contract without a real GUI."""
 
 import importlib.util
 import json
-import re
 import subprocess
-import threading
 from pathlib import Path
 
-import numpy as np
-import open3d as o3d
 import pytest
 
-from scan2mesh import demo, desktop, pipeline
-
-
-@pytest.fixture
-def runs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    destination = tmp_path / "desktop-runs"
-    monkeypatch.setattr(desktop, "RUNS_ROOT", destination)
-    return destination
-
-
-def stub_processing(monkeypatch: pytest.MonkeyPatch, implementation) -> None:
-    """Support either a module-level alias or a lazy processing import."""
-    monkeypatch.setattr(pipeline, "run_pipeline", implementation)
-    if hasattr(desktop, "run_pipeline"):
-        monkeypatch.setattr(desktop, "run_pipeline", implementation)
-
-
-def stub_demo(monkeypatch: pytest.MonkeyPatch, implementation) -> None:
-    monkeypatch.setattr(demo, "generate_demo", implementation)
-    if hasattr(desktop, "generate_demo"):
-        monkeypatch.setattr(desktop, "generate_demo", implementation)
+from scan2mesh import cli, desktop, nksr_runtime, pipeline
 
 
 def forbid_processing(*args, **kwargs):
-    pytest.fail("Cancellation or invalid input must not start processing")
+    pytest.fail("This action must not start processing")
 
 
-def test_no_arguments_cancel_without_processing_or_outputs(
-    runs_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+@pytest.fixture
+def runs_root(tmp_path, monkeypatch):
+    root = tmp_path / "output"
+    monkeypatch.setattr(desktop, "RUNS_ROOT", root)
+    return root
+
+
+def test_cancel_does_not_start_wsl_or_create_output(runs_root, monkeypatch):
     monkeypatch.setattr(desktop, "choose_scan_file", lambda: None)
-    stub_processing(monkeypatch, forbid_processing)
-    stub_demo(monkeypatch, forbid_processing)
-
+    monkeypatch.setattr(nksr_runtime, "run_direct", forbid_processing)
     assert desktop.main([]) is None
-
     assert not runs_root.exists()
-    output = capsys.readouterr().out.lower()
-    assert any(word in output for word in ("abbruch", "abgebrochen", "cancel", "keine datei"))
 
 
-def test_selected_unicode_path_is_passed_unchanged_to_processing(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = tmp_path / "München Halle 3 & $(Test) 'Messung'.ply"
-    source.write_text("placeholder: processing is mocked\n")
+def test_play_routes_original_unicode_file_to_direct_nksr(runs_root, tmp_path, monkeypatch, capsys):
+    source = tmp_path / "Hälle & $(Test) 'Messung'.pts"
+    source.write_text("original measurements")
     calls = []
     monkeypatch.setattr(desktop, "choose_scan_file", lambda: source)
+    monkeypatch.setattr(pipeline, "run_pipeline", forbid_processing)
 
-    def process(input_path, output, config, *, progress=None):
-        calls.append((input_path, output, config))
-        return {"counts": {"mesh_triangles": 1}}
+    def run(source_path, output_root, **options):
+        calls.append((source_path, output_root, options))
+        return output_root / "nksr-direkt-test" / "mesh_colored.ply"
 
-    stub_processing(monkeypatch, process)
-    stub_demo(monkeypatch, forbid_processing)
-
+    monkeypatch.setattr(nksr_runtime, "run_direct", run)
     result = desktop.main([])
-
-    assert len(calls) == 1
-    actual_source, output, config = calls[0]
-    assert actual_source == source.resolve()
-    assert result == output
-    assert result.parent.parent == runs_root
-    assert result.parent.name.startswith("vscode-scan-")
-    assert result.name == "result"
-    assert config.voxel_size == 0.0
-    assert config.plane_distance == 0.01
+    assert calls == [(source.resolve(), runs_root, {"units": "m", "python": None, "wsl_distro": None})]
+    assert result == runs_root / "nksr-direkt-test"
+    assert source.read_text() == "original measurements"
+    output = capsys.readouterr().out
+    assert "Detailstufe 1.0" in output
+    assert "Beide Exporte" in output
+    assert "Fertig:" in output
 
 
-@pytest.mark.parametrize("units, expected_scale", [("m", 0.01), ("mm", 10)])
-def test_explicit_input_bypasses_picker_and_respects_units(
-    tmp_path: Path,
-    runs_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    units: str,
-    expected_scale: float,
-) -> None:
-    source = tmp_path / "scan.ply"
-    source.write_text("placeholder\n")
-    calls = []
+@pytest.mark.parametrize("entry", ["desktop", "cli", "process"])
+def test_all_entry_points_forward_units_output_and_existing_interpreter(
+    entry, runs_root, tmp_path, monkeypatch,
+):
+    source = tmp_path / "scan.pts"
+    source.write_text("original measurements")
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(desktop, "choose_scan_file", forbid_processing)
-
-    def process(input_path, output, config, *, progress=None):
-        calls.append(config)
-        return {"counts": {"mesh_triangles": 1}}
-
-    stub_processing(monkeypatch, process)
-
-    desktop.main(["--input", str(source), "--units", units])
-
-    assert len(calls) == 1
-    assert calls[0].voxel_size == 0.0
-    assert calls[0].plane_distance == expected_scale
-
-
-@pytest.mark.parametrize("units, voxel_size", [("m", "0.002"), ("mm", "2"), ("m", "0")])
-def test_explicit_voxel_size_uses_input_units(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch,
-    units: str, voxel_size: str,
-) -> None:
-    source = tmp_path / "scan.ply"
-    source.write_text("placeholder\n")
     calls = []
 
-    def process(input_path, output, config, *, progress=None):
-        calls.append(config)
-        return {"counts": {"mesh_triangles": 1}}
+    def run(source_path, output_root, **options):
+        calls.append((source_path, output_root, options))
+        return output_root / "nksr-direkt-test" / "mesh_raw.ply"
 
-    stub_processing(monkeypatch, process)
-
-    desktop.main(["--input", str(source), "--units", units, "--voxel-size", voxel_size])
-
-    assert len(calls) == 1
-    assert calls[0].voxel_size == float(voxel_size)
-
-
-@pytest.mark.parametrize("voxel_size", ["-0.01", "nan", "inf"])
-def test_invalid_voxel_size_does_not_create_run(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch, voxel_size: str,
-) -> None:
-    source = tmp_path / "scan.ply"
-    source.write_text("placeholder\n")
-    stub_processing(monkeypatch, forbid_processing)
-
-    with pytest.raises(SystemExit) as error:
-        desktop.main(["--input", str(source), "--voxel-size", voxel_size])
-
-    assert error.value.code == 2
+    monkeypatch.setattr(nksr_runtime, "run_direct", run)
+    options = ["--units", "mm", "--output-root", "Ergebnisse Ä", "--nksr-python", "/home/user/envs/nksr/bin/python", "--nksr-wsl-distro", "Ubuntu-Test"]
+    if entry == "desktop":
+        result = desktop.main(["--input", str(source), *options])
+    elif entry == "cli":
+        result = cli.main(["--input", str(source), *options])
+    else:
+        result = cli.main(["process", str(source), *options])
+    assert calls == [(source.resolve(), tmp_path / "Ergebnisse Ä", {"units": "mm", "python": "/home/user/envs/nksr/bin/python", "wsl_distro": "Ubuntu-Test"})]
+    if entry == "desktop":
+        assert result == tmp_path / "Ergebnisse Ä" / "nksr-direkt-test"
+    else:
+        # Installed console scripts call sys.exit(main()); a Path signals failure.
+        assert result is None
     assert not runs_root.exists()
 
 
-def test_demo_is_explicit_and_uses_demo_parameters(
-    runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    generated, processed = [], []
-    monkeypatch.setattr(desktop, "choose_scan_file", forbid_processing)
-
-    def generate(path):
-        generated.append(path)
-        path.write_text("demo placeholder\n")
-
-    def process(input_path, output, config, *, progress=None):
-        processed.append((input_path, output, config))
-        return {"counts": {"mesh_triangles": 1}}
-
-    stub_demo(monkeypatch, generate)
-    stub_processing(monkeypatch, process)
-
-    result = desktop.main(["--demo"])
-
-    assert len(generated) == len(processed) == 1
-    assert generated[0] == processed[0][0]
-    assert generated[0].parent == result.parent
-    assert result.parent.name.startswith("vscode-demo-")
-    assert processed[0][2].voxel_size == 0.025
-    assert processed[0][2].plane_distance == 0.015
-
-
-def test_demo_and_input_are_mutually_exclusive(
-    runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    stub_processing(monkeypatch, forbid_processing)
-    stub_demo(monkeypatch, forbid_processing)
-
-    with pytest.raises(SystemExit) as error:
-        desktop.main(["--demo", "--input", "scan.ply"])
-
-    assert error.value.code == 2
-    assert not runs_root.exists()
-
-
-def test_picker_failure_is_actionable_without_creating_run(
-    runs_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    def unavailable():
-        raise RuntimeError("Dateiauswahl-Test: kein grafischer Desktop")
-
-    monkeypatch.setattr(desktop, "choose_scan_file", unavailable)
-    stub_processing(monkeypatch, forbid_processing)
-
-    with pytest.raises(SystemExit) as error:
-        desktop.main([])
-
-    assert error.value.code == 2
-    assert "Dateiauswahl-Test" in capsys.readouterr().err
-    assert not runs_root.exists()
-
-
-@pytest.mark.parametrize("input_kind", ["missing", "directory"])
-def test_invalid_input_is_rejected_before_creating_run(
-    tmp_path: Path,
-    runs_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys,
-    input_kind: str,
-) -> None:
-    source = tmp_path / "invalid-input.ply"
-    if input_kind == "directory":
+@pytest.mark.parametrize("kind", ["missing", "directory", "unsupported"])
+def test_invalid_input_does_not_start_backend_or_create_output(kind, runs_root, tmp_path, monkeypatch):
+    source = tmp_path / ("scan.e57" if kind == "unsupported" else "scan.pts")
+    if kind == "directory":
         source.mkdir()
-    monkeypatch.setattr(desktop, "choose_scan_file", forbid_processing)
-    stub_processing(monkeypatch, forbid_processing)
-
+    elif kind == "unsupported":
+        source.write_text("not directly supported")
+    monkeypatch.setattr(nksr_runtime, "run_direct", forbid_processing)
     with pytest.raises(SystemExit) as error:
         desktop.main(["--input", str(source)])
-
     assert error.value.code == 2
-    assert source.name in capsys.readouterr().err
     assert not runs_root.exists()
+
+
+def test_picker_failure_creates_no_output(runs_root, monkeypatch, capsys):
+    def fail():
+        raise RuntimeError("Dateiauswahl: kein Desktop")
+    monkeypatch.setattr(desktop, "choose_scan_file", fail)
+    monkeypatch.setattr(nksr_runtime, "run_direct", forbid_processing)
+    with pytest.raises(SystemExit) as error:
+        desktop.main([])
+    assert error.value.code == 2
+    assert "kein Desktop" in capsys.readouterr().err
+    assert not runs_root.exists()
+
+
+def test_backend_failure_has_no_classical_fallback(runs_root, tmp_path, monkeypatch, capsys):
+    source = tmp_path / "scan.pts"
+    source.write_text("original measurements")
+    def fail(*args, **kwargs):
+        raise RuntimeError("CUDA out of memory")
+    monkeypatch.setattr(nksr_runtime, "run_direct", fail)
+    monkeypatch.setattr(pipeline, "run_pipeline", forbid_processing)
+    with pytest.raises(SystemExit) as error:
+        desktop.main(["--input", str(source)])
+    output = capsys.readouterr()
+    assert error.value.code == 2
+    assert "CUDA out of memory" in output.err
+    assert "Fertig:" not in output.out
 
 
 @pytest.mark.parametrize(
@@ -292,37 +193,6 @@ def test_windows_picker_reports_powershell_failure(monkeypatch: pytest.MonkeyPat
         desktop._pick_windows_scan()
 
 
-def test_real_own_scan_produces_fresh_results_on_each_start(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    index = np.arange(1_200)
-    z = 1 - 2 * (index + 0.5) / len(index)
-    theta = np.pi * (3 - np.sqrt(5)) * index
-    radius = np.sqrt(1 - z**2)
-    points = np.column_stack((radius * np.cos(theta), radius * np.sin(theta), z))
-    # Match a measured scan rather than an exactly co-spherical Delaunay input.
-    points += np.random.default_rng(41).normal(0, 0.0005, points.shape)
-    source = tmp_path / "Eigener Scan Ä.ply"
-    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    assert o3d.io.write_point_cloud(str(source), cloud)
-    monkeypatch.setattr(desktop, "choose_scan_file", forbid_processing)
-
-    first = desktop.main(["--input", str(source)])
-    original_mesh = (first / "mesh.ply").read_bytes()
-    second = desktop.main(["--input", str(source)])
-
-    assert first != second
-    assert first.parent.parent == second.parent.parent == runs_root
-    assert (first / "mesh.ply").read_bytes() == original_mesh
-    for result in (first, second):
-        assert result.name == "result"
-        assert (result / "mesh.ply").stat().st_size > 0
-        report = json.loads((result / "report.json").read_text())
-        assert report["input_path"] == str(source.resolve())
-        assert report["counts"]["mesh_triangles"] > 1_000
-        assert report["quality"]["point_to_mesh"]["p95"] < 0.08
-
-
 def load_project_bootstrap():
     entry = Path(__file__).resolve().parents[1] / "main.py"
     specification = importlib.util.spec_from_file_location("scan2mesh_bootstrap_test", entry)
@@ -388,7 +258,7 @@ def test_windows_default_output_uses_local_app_data(
 
     destination = desktop.default_runs_root()
 
-    assert destination == local_data / "Scan2Mesh" / "runs"
+    assert destination == local_data / "Scan2Mesh"
     assert not local_data.exists()
 
 
@@ -402,7 +272,7 @@ def test_windows_output_falls_back_to_local_user_data(
 
     destination = desktop.default_runs_root()
 
-    assert destination == user_home / "AppData" / "Local" / "Scan2Mesh" / "runs"
+    assert destination == user_home / "AppData" / "Local" / "Scan2Mesh"
     assert not user_home.exists()
 
 
@@ -410,113 +280,3 @@ def test_non_windows_default_output_stays_in_checkout(monkeypatch: pytest.Monkey
     monkeypatch.setattr(desktop.sys, "platform", "linux")
 
     assert desktop.default_runs_root() == Path(desktop.__file__).resolve().parents[2] / "runs"
-
-
-def test_custom_output_root_resolves_relative_to_caller(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    source = tmp_path / "scan.ply"
-    source.write_text("placeholder\n")
-    chosen_root = Path("Ergebnisse Ä") / ".." / "Eigene Ergebnisse"
-    calls = []
-
-    def process(input_path, output, config, *, progress=None):
-        calls.append(output)
-        return {"counts": {"mesh_triangles": 1}}
-
-    stub_processing(monkeypatch, process)
-
-    result = desktop.main(["--input", str(source), "--output-root", str(chosen_root)])
-
-    assert result.parent.parent == (tmp_path / "Eigene Ergebnisse").resolve()
-    assert calls == [result]
-    assert not runs_root.exists()
-
-
-def test_cancellation_does_not_create_custom_output_root(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    destination = tmp_path / "unused-custom-output"
-    monkeypatch.setattr(desktop, "choose_scan_file", lambda: None)
-    stub_processing(monkeypatch, forbid_processing)
-
-    assert desktop.main(["--output-root", str(destination)]) is None
-
-    assert not destination.exists()
-    assert not runs_root.exists()
-
-
-def test_invalid_input_does_not_create_custom_output_root(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    destination = tmp_path / "unused-custom-output"
-    source = tmp_path / "missing.ply"
-    stub_processing(monkeypatch, forbid_processing)
-
-    with pytest.raises(SystemExit) as error:
-        desktop.main(["--input", str(source), "--output-root", str(destination)])
-
-    assert error.value.code == 2
-    assert not destination.exists()
-    assert not runs_root.exists()
-
-
-def test_desktop_announces_deferred_output_and_forwards_timed_progress(
-    tmp_path: Path, runs_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    source = tmp_path / "scan.ply"
-    source.write_text("placeholder\n")
-    invocation = []
-
-    def process(input_path, output, config, *, progress=None):
-        before_processing = capsys.readouterr().out
-        assert str(output) in before_processing
-        assert "Ergebnisordner" in before_processing and "Abschluss" in before_processing
-        assert not output.exists()
-        assert callable(progress)
-        progress("Testphase: Rekonstruktion")
-        invocation.append(output)
-        return {"counts": {"mesh_triangles": 1}}
-
-    stub_processing(monkeypatch, process)
-
-    result = desktop.main(["--input", str(source)])
-
-    assert invocation == [result]
-    after_processing = capsys.readouterr().out
-    progress_line = next(line for line in after_processing.splitlines() if "Testphase:" in line)
-    assert re.match(r"^\[\d+:\d+\]", progress_line)
-    assert after_processing.index("Testphase:") < after_processing.index("Fertig:")
-
-
-def test_progress_heartbeat_stops_its_thread_when_processing_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    heartbeat = threading.Event()
-    created_threads, lines = [], []
-    actual_thread = threading.Thread
-
-    def create_thread(*args, **kwargs):
-        thread = actual_thread(*args, **kwargs)
-        created_threads.append(thread)
-        return thread
-
-    def record(*values, **kwargs):
-        message = " ".join(map(str, values))
-        lines.append(message)
-        if "Warte auf Abschluss:" in message:
-            heartbeat.set()
-
-    monkeypatch.setattr(desktop, "Thread", create_thread)
-    monkeypatch.setattr(desktop, "print", record, raising=False)
-
-    with pytest.raises(RuntimeError, match="simulated processing failure"):
-        with desktop._ProgressPrinter(heartbeat_interval=0.01) as progress:
-            progress("Laden: Beispiel")
-            assert heartbeat.wait(timeout=2), "Expected a heartbeat while the processing stage is running"
-            raise RuntimeError("simulated processing failure")
-
-    assert created_threads
-    assert all(thread.daemon and not thread.is_alive() for thread in created_threads)
-    assert any("Warte auf Abschluss: Laden: Beispiel" in line for line in lines)

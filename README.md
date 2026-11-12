@@ -1,171 +1,97 @@
 # Scan2Mesh
 
-Ein Python-Prototyp für die Verarbeitung von Punktwolken aus Baustellen und Industrieanlagen: Ausreißer bereinigen, geometrische Ebenen erkennen, ein Dreiecksmesh rekonstruieren und das Ergebnis prüfen. Der erste Anwendungsfall sind bereits registrierte Ausschnitte von Hallen und Kraftwerken mit großen Flächen und feinen Strukturen wie Rohrleitungen.
+Scan2Mesh rekonstruiert Punktwolken mit **NKSR direkt auf höchster Detailstufe**. Auf `main` verwenden Play, F5 und der Terminalstart denselben Ablauf wie der Referenzlauf `nksr-direkt-20261103-102607-9a8c5ff5`: alle Originalpunkte, Modell `ks`, `detail_level=1.0`, `mise_iter=1` und beide Meshvarianten mit und ohne interne NKSR-Maske.
 
-Die Ebenenerkennung liefert geometrische Modelle. Sie bezeichnet Flächen noch nicht automatisch als Wand, Boden oder Bauteil. Rohr- und Objekterkennung, eine Optimierung der Scanregistrierung und CAD-Ableitung sind noch nicht enthalten.
+Die vorhandene NKSR-Installation unter Linux beziehungsweise WSL wird weiterverwendet. Ein Wechsel auf einen anderen Scan2Mesh-Branch ist nicht erforderlich.
 
 ## In VS Code starten (Windows)
 
-1. Die aktuelle lokale Kopie des Repositorys über **Datei → Ordner öffnen** in VS Code öffnen. Im geöffneten Ordner muss `pyproject.toml` liegen.
-2. Die empfohlenen Microsoft-Erweiterungen **Python** und **Python Debugger** installieren.
-3. Falls `uv` noch fehlt, im integrierten Terminal installieren und VS Code danach neu starten:
+1. Den Scan2Mesh-Projektordner öffnen, in dem `main.py` und `pyproject.toml` liegen. Die Erweiterungen **Python** und **Python Debugger** installieren.
+2. Auf `main` aktualisieren:
+
+   ```powershell
+   git switch main
+   git pull --ff-only origin main
+   ```
+
+3. Falls `uv` fehlt, einmal installieren und VS Code neu starten:
 
    ```powershell
    winget install --id astral-sh.uv --exact
    ```
 
-4. Vor dem ersten Start einmal **Strg+Umschalt+B** drücken. Die Standardaufgabe **Scan2Mesh: Umgebung vorbereiten** legt mit `uv sync --frozen` die Python-Umgebung unter `%LOCALAPPDATA%\Scan2Mesh\venv` an und installiert die festgelegten Abhängigkeiten. Warten, bis sie erfolgreich abgeschlossen ist; beim ersten Mal müssen die Pakete heruntergeladen werden, was etwas dauern kann.
-5. **`main.py` öffnen und oben rechts auf ▶ „Python-Datei ausführen“ klicken.** Alternativ startet **F5** die Standardkonfiguration **Scan2Mesh: Eigener Scan**.
-6. Im Windows-Dateiauswahldialog die Punktwolke auswählen. Anschließend beginnt die Verarbeitung automatisch. **Abbrechen** schließt die Auswahl ohne Verarbeitung.
+4. **Strg+Umschalt+B** drücken und warten, bis **Scan2Mesh: Umgebung vorbereiten** erfolgreich abgeschlossen ist. Die Python-Umgebung und der Cache liegen unter `%LOCALAPPDATA%\Scan2Mesh`, außerhalb des Repositorys und eines möglichen OneDrive-Ordners.
+5. **`main.py` öffnen und ▶ „Python-Datei ausführen“ klicken.** Alternativ **F5** mit **Scan2Mesh: NKSR direkt (Standard)** verwenden.
+6. Im Dateidialog die Punktwolke auswählen. **Abbrechen** beendet die Auswahl ohne Verarbeitung.
 
-Jeder Verarbeitungslauf schreibt in einen neuen Ergebnisordner. Unter Windows liegt dieser standardmäßig unter **`%LOCALAPPDATA%\Scan2Mesh\runs`**, beispielsweise in `vscode-scan-<Kennung>\result`. Diesen Basispfad kannst du direkt in die Adressleiste des Windows-Explorers eingeben. Falls `LOCALAPPDATA` nicht gesetzt ist, wird `%USERPROFILE%\AppData\Local\Scan2Mesh\runs` verwendet. Auf anderen Betriebssystemen liegen die Ergebnisse unter `runs` im Repository.
+Im Terminal erscheint **„NKSR direkt: Modell ks, Detailstufe 1.0, alle Originalpunkte.“** Anschließend zeigt NKSR die Verarbeitungsstufen und den Ausgabepfad. Für diesen Standardlauf sind keine Detail-, Filter- oder Vergleichsparameter erforderlich.
 
-Der im integrierten Terminal angezeigte Ausgabepfad ist zunächst der **Zielpfad**. Der Ordner `result` erscheint erst nach vollständiger Verarbeitung und Qualitätsprüfung; die Meldung **`Fertig: …`** bestätigt den erfolgreichen Abschluss. Während die Verarbeitung noch läuft, ist ein fehlender `result`-Ordner daher zunächst normal. Die Stufenmeldungen mit verstrichener Laufzeit zeigen den zuletzt begonnenen Schritt, keine Prozentanzeige oder geschätzte Restzeit. Große E57-Dateien werden vollständig geladen; das kann längere Rechenzeit und viel Arbeitsspeicher beanspruchen.
+## Vorhandene NKSR-Umgebung
 
-Im fertigen Ergebnisordner liegen `mesh.ply`, `cleaned.ply`, `segments.ply` und `report.json`. Zum Ansehen `mesh.ply` beispielsweise in CloudCompare oder MeshLab öffnen. Die ausgewählte Quelldatei bleibt an ihrem ursprünglichen Ort, auch wenn sie in einem OneDrive-Ordner liegt.
+Unter Windows verwendet der Start WSL, standardmäßig die Distribution **Ubuntu-22.04**. Eine ausdrücklich gesetzte Option oder Umgebungsvariable hat Vorrang:
 
-VS Code und der Play-Start verwenden unter Windows automatisch die externe Python-Umgebung und den Cache unter `%LOCALAPPDATA%\Scan2Mesh\cache\uv`. Für die folgenden **optionalen Terminalbefehle** diese Pfade einmal pro PowerShell-Terminal setzen, damit auch `uv sync` und `uv run` dieselbe Umgebung verwenden:
+| Einstellung | Option | Umgebungsvariable |
+| --- | --- | --- |
+| WSL-Distribution | `--nksr-wsl-distro` | `SCAN2MESH_NKSR_WSL_DISTRO` |
+| Linux-Python mit NKSR | `--nksr-python` | `SCAN2MESH_NKSR_PYTHON` |
+
+Ohne angegebenen Python-Pfad sucht der Starter nach einer bereits eingerichteten `nksr`-Umgebung in üblichen Conda-/Mamba-Verzeichnissen im Linux-Benutzerprofil und prüft, ob PyTorch und NKSR importierbar sind. Genau ein gefundener Interpreter wird verwendet. Bei keiner oder mehreren passenden Umgebungen nennt die Fehlermeldung die erforderliche Einstellung. Es werden keine Pakete automatisch in die NKSR-Umgebung installiert.
+
+Für einen abweichenden vorhandenen Interpreter ist beispielsweise folgender Start möglich; den Beispielpfad ersetzen:
+
+```powershell
+uv run python main.py --nksr-wsl-distro Ubuntu-22.04 --nksr-python /home/DEIN_LINUXNAME/miniforge3/envs/nksr/bin/python
+```
+
+Eine einmalige, dauerhaft für Play/F5 verfügbare Konfiguration und die Einrichtung einer neuen NKSR-Umgebung beschreibt [NKSR einrichten](docs/nksr.md).
+
+## Eingabe und Terminalstart
+
+Unterstützt werden **PLY, PCD, PTS, XYZ, XYZN und XYZRGB**. E57 sowie ReCap-Dateien RCP/RCS vor diesem direkten Ablauf als PLY oder PTS exportieren. RGB-Farben und vorhandene Normalen lassen sich beispielsweise in PLY speichern.
+
+Ohne Dateidialog:
+
+```powershell
+uv run python main.py --input "C:\Scans\Abstellkammer_01.pts"
+```
+
+Die Eingabekoordinaten werden standardmäßig als Meter interpretiert. Bei Millimeterkoordinaten ausdrücklich `--units mm` angeben. Einheiten werden nicht automatisch erkannt; die Ergebnisse erhalten die ursprünglichen Einheiten und Weltkoordinaten zurück.
+
+Ein eigener Ausgabe-Stammordner ist möglich:
+
+```powershell
+uv run python main.py --input "C:\Scans\scan.ply" --output-root "D:\Scan2Mesh-Ergebnisse"
+```
+
+`uv run scan2mesh`, `uv run scan2mesh --input DATEI` und `uv run scan2mesh process DATEI --output-root ORDNER` führen denselben Ablauf aus. Beim `process`-Befehl bleibt `--output` als Alias für das **Stammverzeichnis** verfügbar; jeder Lauf erzeugt darunter einen neuen Ergebnisordner. Der frühere PowerShell-Start `powershell.exe -NoProfile -STA -File .\nksr-direkt.ps1` ruft ebenfalls den gemeinsamen Standardstart auf.
+
+Für optionale `uv`-Terminalbefehle unter Windows dieselbe externe Umgebung und denselben Cache wie in VS Code wählen:
 
 ```powershell
 $env:UV_PROJECT_ENVIRONMENT = Join-Path $env:LOCALAPPDATA 'Scan2Mesh\venv'
 $env:UV_CACHE_DIR = Join-Path $env:LOCALAPPDATA 'Scan2Mesh\cache\uv'
 ```
 
-Für einen eigenen Ergebnis-Basispfad im Terminal starten:
+Unter Linux läuft NKSR direkt im gewählten Interpreter; dort beispielsweise `uv run python main.py --input scan.ply --nksr-python /pfad/zur/nksr-umgebung/bin/python` verwenden.
 
-```powershell
-uv run python main.py --output-root "D:\Scan2Mesh-Ergebnisse"
-```
+## Ergebnisse
 
-Auch dieser Start öffnet die Dateiauswahl und erzeugt anschließend einen neuen Ergebnisordner am gewählten Speicherort. Falls die Ausgabe abschließend nicht in den Ergebnisordner übernommen werden kann, bleiben fertig geschriebene Dateien am im Terminal genannten Wiederherstellungspfad erhalten.
-
-Der einfache Start geht von **Koordinaten in Metern** aus, wie bei einem üblichen E57-Export. Einheiten werden nicht automatisch erkannt. **Eigene Scans werden beim Play-/F5-Start standardmäßig in voller Punktauflösung verarbeitet (`voxel_size=0`), ohne Voxelreduktion.** Damit entfällt die bisherige Reduktion auf ein Zentimeter-Raster, die feine Strukturen entfernen konnte. Die Ebenentoleranz beträgt weiterhin einen Zentimeter; im globalen Modus beeinflusst sie nur die Ebenenmarkierung, nicht die Meshauflösung. Für eine Punktwolke mit Millimeterkoordinaten im Terminal stattdessen starten:
-
-```powershell
-uv run python main.py --units mm
-```
-
-Auch dabei öffnet sich die Dateiauswahl; die Ebenentoleranz wird an Millimeterkoordinaten angepasst, die Voxelreduktion bleibt deaktiviert.
-
-Für ein möglichst sauberes Mesh bleiben die Entfernung ungültiger und doppelter Punkte, der statistische Ausreißerfilter (20 Nachbarn, Standardabweichungsfaktor 2.0) sowie die Entfernung doppelter und degenerierter Dreiecke und unreferenzierter Meshknoten aktiv. Normalen- und Ball-Pivoting-Radien werden aus den Punktabständen abgeleitet. Die globale Ball-Pivoting-Rekonstruktion erhält die gemessene Detailbasis ohne zusätzliche Glättung oder Meshvereinfachung. Volle Punktauflösung kann Rauschen enthalten; sie garantiert kein fehlerfreies oder geschlossenes Mesh. Die Qualitätsprüfung dokumentiert weiterhin Abstände und Topologiekennzahlen in `report.json`.
-
-Die Verarbeitung mit voller Punktauflösung kann deutlich mehr Laufzeit und Arbeitsspeicher benötigen. Falls eine bewusste Reduktion nötig ist, lässt sich die Voxelgröße explizit setzen, beispielsweise auf 2 mm bei Meterkoordinaten:
-
-```powershell
-uv run python main.py --voxel-size 0.002
-```
-
-`--voxel-size` verwendet die Eingabeeinheiten; bei `--units mm` entspricht `--voxel-size 2` ebenfalls 2 mm. `--voxel-size 0` deaktiviert die Reduktion ausdrücklich. Die synthetische Demo behält ihren bisherigen Standard von 0.025 m bei; der Parameter kann auch dort überschrieben werden. Weitere Parameter lassen sich über die folgenden Terminalbefehle steuern.
-
-Die alternative Startkonfiguration **Scan2Mesh: Demo** erzeugt und verarbeitet eine synthetische Industrieszene. Sie lässt sich auch mit `uv run python main.py --demo` starten. Ohne Dateiauswahl ist ein Start mit `uv run python main.py --input "C:\Scans\halle.e57"` möglich.
-
-Für die Vorschau der getrennten Flächenverarbeitung unter **Ausführen und Debuggen** die Konfiguration **Scan2Mesh: Segmentierte Rekonstruktion (Vorschau)** wählen und F5 drücken. Es öffnet sich dieselbe Dateiauswahl. Die Vorschau lässt sich auch mit `uv run python main.py --surface-mode segmented` starten. Der normale Play-Start verwendet weiterhin den globalen Modus.
-
-### Falls die Vorbereitung mit `WinError 5` abbricht
-
-Ein Fehler beim Entfernen von `.venv\Lib\site-packages\…dist-info` bedeutet, dass Windows den Zugriff auf diese Paketmetadaten verweigert hat. Liegt die Datei im OneDrive-Repository, ist damit noch nicht geklärt, welcher Prozess oder welche Berechtigung den Zugriff verhindert.
-
-Debugging beenden, die aktuelle Version mit **Pull origin** holen und VS Code neu laden oder neu starten. Danach einmal **Strg+Umschalt+B** ausführen und die erfolgreiche Installation abwarten. Anschließend wie gewohnt mit Play oder der gewünschten F5-Konfiguration starten. Die Einrichtung verwendet nun die Umgebung unter `%LOCALAPPDATA%\Scan2Mesh\venv`; Quellcode und eine vorhandene alte `.venv` bleiben erhalten. Administratorrechte oder manuelles Löschen der alten Umgebung sind dafür nicht erforderlich.
-
-## Im Terminal starten
-
-Im Repository-Verzeichnis mit Python 3.12 und [uv](https://docs.astral.sh/uv/):
-
-In der Cloud-Umgebung zuerst den Cache auf einen beschreibbaren Pfad legen:
-
-```bash
-export UV_CACHE_DIR="${UV_CACHE_DIR:-/workspace/.cache/uv}"
-```
-
-```bash
-uv sync --frozen
-uv run scan2mesh demo --output data/demo.ply
-uv run scan2mesh process data/demo.ply --output runs/demo --voxel-size 0.025 --plane-distance 0.015
-uv run pytest
-```
-
-Die Demo erzeugt eine **synthetische** Industrieszene in Metern. Sie dient dem reproduzierbaren Funktionstest und ersetzt keine Validierung an einem echten Baustellenscan. Die Verarbeitung und Tests benötigen kein grafisches Fenster.
-
-Für einen Vergleich mit Poisson-Rekonstruktion einen anderen Ausgabeordner verwenden:
-
-```bash
-uv run scan2mesh process data/demo.ply --output runs/demo-poisson --voxel-size 0.025 --plane-distance 0.015 --reconstruction poisson --poisson-depth 8
-```
-
-## Segmentierte Rekonstruktion (Vorschau)
-
-Mit `--surface-mode segmented` werden zusammenhängende ebene Bereiche geometrisch erkannt und getrennt vermesht. Die Triangulation orientiert sich an der tatsächlich beobachteten Punktunterstützung, um insbesondere größere ungemessene Bereiche nicht pauschal zu überspannen. Restpunkte bleiben als `unknown` erkennbar und werden separat rekonstruiert. Dieser Modus verwendet kein vortrainiertes Modell und weist keine semantischen Klassen wie „Wand“, „Rohr“ oder „Maschine“ zu.
-
-```bash
-uv run scan2mesh process /pfad/zum/ausschnitt.ply --output runs/segmentiert --surface-mode segmented --voxel-size 0.01 --plane-distance 0.01
-```
-
-Punktdichte und Verarbeitungsschwellen begrenzen auch hier den Detailerhalt. Kleine Öffnungen können überbrückt werden; der Modus garantiert nicht die Erhaltung aller Löcher. Die globale Rekonstruktion bleibt der Standard (`--surface-mode global`) und dient als Vergleich. Ein Nachweis besserer Genauigkeit an einem realen Baustellenscan steht noch aus.
-
-## Eigene Scans
-
-Unterstützte Eingabeformate sind `.e57`, `.ply`, `.pcd`, `.xyz`, `.xyzn`, `.xyzrgb` und `.pts`. E57-Dateien werden über `pye57` gelesen; gespeicherte Scanpositionen und -orientierungen werden angewendet. Eine fehlerhafte Registrierung wird dabei nicht neu berechnet oder optimiert. ReCap-Projektdateien im Format RCP/RCS werden nicht direkt gelesen; zunächst beispielsweise E57 exportieren.
-
-```bash
-uv run scan2mesh process /pfad/zum/ausschnitt.ply --output runs/ausschnitt --voxel-size 0.01 --plane-distance 0.01
-uv run scan2mesh process --help
-```
-
-Ein räumlicher Ausschnitt lässt sich mit sechs Koordinaten auswählen:
-
-```bash
-uv run scan2mesh process /pfad/zur/halle.e57 --output runs/hallenausschnitt --crop 1000 2000 0 1020 2020 15 --voxel-size 0.01 --plane-distance 0.01
-```
-
-Die Reihenfolge ist `xmin ymin zmin xmax ymax zmax`. Die Beispielgrenzen müssen an die tatsächlichen Baustellenkoordinaten angepasst werden. Es gilt das Koordinatensystem der importierten Punktwolke, bei E57 nach Anwendung der gespeicherten Scantransformationen.
-
-Für den Anfang einen kleinen, bereits registrierten Ausschnitt wählen, der eine relevante Fläche, eine echte Öffnung und ein feines Bauteil enthält. Das Zuschneiden erfolgt vor der aufwendigen Bereinigung und Rekonstruktion. Der Import liest Punktdaten jedoch zunächst in den Arbeitsspeicher; `--crop` ist keine Verarbeitung großer Dateien in speicherbegrenzten Blöcken. Ein kompletter Kraftwerks- oder Baustellenscan ist noch kein geprüfter Anwendungsfall.
-
-**Einheiten werden aus den Koordinaten übernommen und nicht automatisch erkannt oder umgerechnet.** Bei einer Punktwolke in Metern entsprechen `0.01` einem Zentimeter. Bei Millimeterkoordinaten müssen die Parameter entsprechend angepasst werden. Die Demo-Einstellungen sind kein allgemeines Genauigkeitsversprechen. Eine zu große Voxelgröße kann dünne Strukturen entfernen.
-
-Die Quelldatei bleibt unverändert. Als Ausgabe einen neuen oder leeren Ordner verwenden; bestehende Ergebnisse werden nicht überschrieben.
-
-## Ergebnisse beurteilen
+Unter Windows liegt jeder Lauf in einem neuen Ordner unter **`%LOCALAPPDATA%\Scan2Mesh\nksr-direkt-<Zeitstempel>-<Kennung>`**. Auf anderen Betriebssystemen liegt der Standard unter `runs` im Repository. Der genaue Pfad steht im Terminal. Bestehende Ergebnisse und die Quelldatei bleiben erhalten.
 
 | Datei | Inhalt |
 | --- | --- |
-| `cleaned.ply` | Bereinigte Punktwolke als Grundlage für die Rekonstruktion |
-| `segments.ply` | Punktwolke mit farbig markierten Ebenen; im segmentierten Modus getrennte ebene Bereiche und unbekannte Restpunkte |
-| `mesh.ply` | Rekonstruiertes Dreiecksmesh |
-| `report.json` | Parameter, Punkt- und Meshanzahlen, Ebenenmodelle, Abstände und Topologiekennzahlen; im segmentierten Modus zusätzlich Segmentierungsangaben |
-| `segmentation.npz` | Nur im segmentierten Modus: ganzzahlige `patch_ids` in derselben Punktreihenfolge wie `cleaned.ply` |
+| `mesh_colored.ply` | Mesh mit interner NKSR-Maske (`trim=True`), mit Farben aus der Originalpunktwolke |
+| `mesh_colored_untrimmed.ply` | Mesh ohne interne NKSR-Maske (`trim=False`), ebenfalls mit Originalfarben |
+| `nksr_raw.npz` | Unveränderte Vertex- und Dreiecksarrays des maskierten NKSR-Exports samt Koordinatenmetadaten |
+| `nksr_raw_untrimmed.npz` | Entsprechende Roharrays des unmaskierten Exports |
+| `run.json` | Eingabe, Punktzahl, Einheiten, Normalenherkunft, Modell, Detailstufe und beide Exporte mit ihren Zählwerten und Pfaden |
 
-Im segmentierten Modus enthält `segmentation.npz` die `int32`-Zuordnungen `patch_ids`; `-1` steht für `unknown`. Sie beziehen sich auf die Punkte **nach Bereinigung und Voxelreduktion**, nicht auf die Originalpunktreihenfolge des Scans. Die IDs bezeichnen geometrische Bereiche und keine erkannten realen Objekte.
+Wenn die Quelle keine RGB-Farben besitzt, heißen die PLY-Dateien stattdessen `mesh_raw.ply` und `mesh_raw_untrimmed.ply`. Zum Ansehen CloudCompare oder MeshLab verwenden und vorhandene RGB-Farben einschalten.
 
-Unter `segmentation` dokumentiert `report.json` die Anzahl der Bereiche (`patch_count`), zugeordnete Ebenenpunkte (`planar_points`), unbekannte Punkte (`unknown_points`) und Angaben zu jedem Bereich. `kind` ist `geometric`; `semantic_model` und die `semantic_class` der Bereiche sind `null`. Objektklassen und Klassifikationswahrscheinlichkeiten werden nicht automatisch erzeugt. `diagnostics` nennt problematische Bereiche. Nicht verwendbare Flächenbereiche fallen auf `unknown` zurück; nicht vermeshte Randpunkte akzeptierter Bereiche werden als `unmeshed_points` ausgewiesen. Diese Punkte bei der Vollständigkeitsprüfung berücksichtigen.
+Der Ablauf entfernt keine Punkte, filtert keine Ausreißer, segmentiert keine Flächen und bereinigt oder vereinfacht das NKSR-Mesh nicht nachträglich. Vorhandene Normalen werden übernommen; fehlende Normalen werden mit Open3D geschätzt und konsistent ausgerichtet. Die Einzelheiten einschließlich Farbübertragung und Maskenvergleich stehen in [NKSR-Direktlauf](docs/nksr-direct.md).
 
-Die PLY-Dateien lassen sich beispielsweise in CloudCompare oder MeshLab öffnen. Originalpunktwolke und Mesh gemeinsam ansehen, besonders an Öffnungen, Kanten, Rohren und dünnen Blechen.
+Die Punktwolke wird vollständig geladen und ohne Chunking rekonstruiert. RAM und GPU-Speicher begrenzen die verarbeitbare Größe. Bei Speichermangel oder NKSR-Fehlern wird der Lauf mit einer Fehlermeldung beendet; es erfolgt kein automatischer Wechsel des Verfahrens oder der Detailstufe. Bereits geschriebene Rohdaten und Exporte bleiben erhalten. Höchste Detailstufe garantiert kein rauschfreies oder geschlossenes Mesh; Originalpunkte, feine Bauteile und echte Öffnungen weiterhin vergleichen.
 
-Unter `quality` unterscheidet der Bericht drei Referenzen:
+Die älteren Module für Ball Pivoting, Poisson und geometrische Segmentierung bleiben als Vergleichscode im Repository; die normalen Programmstarts rufen sie nicht auf. Die automatisierten Tests prüfen unter anderem Startweiterleitung und den Exportvertrag mit einem nachgebildeten NKSR-Backend. Eine echte GPU-Rekonstruktion benötigt die eingerichtete Linux-/WSL-Umgebung.
 
-| Feld | Vergleich |
-| --- | --- |
-| `point_to_mesh` | Bereinigte Punkte → Mesh: Wie gut passt das Mesh zur verarbeiteten Punktwolke? |
-| `mesh_to_cloud` | Meshoberfläche → bereinigte Punktwolke: Wo entstehen Flächen mit wenig Unterstützung durch Messpunkte? |
-| `original_to_mesh` | Importierte Originalpunkte mit endlichen Koordinaten innerhalb des Ausschnitts → Mesh, vor Duplikatentfernung, Voxelreduktion und Ausreißerfilter |
-
-Alle Abstandsangaben verwenden die Eingabeeinheiten und werden aus Stichproben berechnet. Für die Meshoberfläche werden Meshknoten, Dreiecksmittelpunkte und flächengleichverteilte Zufallspunkte kombiniert. `sample_counts` nennt die tatsächlich ausgewerteten Anzahlen. Median und 95-Prozent-Quantil helfen beim Vergleich; `max` ist das beobachtete Stichprobenmaximum und keine garantierte Schranke der größten Abweichung beziehungsweise des Hausdorff-Abstands.
-
-Eine gute Anpassung ausschließlich an die bereinigte Wolke könnte zuvor entfernte Details verbergen. Deshalb `original_to_mesh`, entfernte Punktanzahlen und die visuelle Kontrolle zusammen betrachten. In den Originaldaten enthaltene Ausreißer können diese Abstände ebenfalls erhöhen; ein größerer Wert allein belegt keinen Rekonstruktionsfehler. Die Gegenrichtung `mesh_to_cloud` hilft, zusätzlich erzeugte Flächen zu erkennen.
-
-Die Messungen sind Qualitätsindikatoren für diesen Ausschnitt und kein Nachweis korrekter Geometrie in nicht gescannten Bereichen. Ein glattes oder geschlossenes Mesh allein belegt keine höhere Genauigkeit.
-
-## Umgang mit Öffnungen
-
-Der Standard verwendet Ball Pivoting. Auch dieses Verfahren kann abhängig von Punktdichte und Radien unerwünschte Verbindungen erzeugen; offene Bereiche bleiben nicht garantiert erhalten. Poisson kann in schwach oder gar nicht gemessenen Bereichen zusätzliche Flächen erzeugen und gewünschte Öffnungen überspannen.
-
-**Gezieltes Lochschließen und das Markieren von „offen halten“ sind noch nicht implementiert.** Entsprechend prüft der erste Vergleich, wo beide Rekonstruktionsverfahren an den vorhandenen Messdaten scheitern. Fehlende Geometrie wird noch nicht anhand einer erkannten Objektklasse ergänzt.
-
-## Nächste Entwicklungsschritte
-
-1. Die geometrische Aufteilung in zusammenhängende Ebenen ist als Vorschau verfügbar. Als Nächstes an einem echten Baustellenausschnitt Originalpunkte, bereinigte Punkte und beide Meshvarianten vergleichen; Anforderungen an Laufzeit, Detailerhalt und zulässige Abweichung festlegen.
-2. Öffnungen gezielt auswählen, lokale Rekonstruktion und kontrolliertes Lochschließen ergänzen; große Scans in überlappende Bereiche aufteilen.
-3. Zylinder und Rohrabschnitte geometrisch anpassen und gemeinsam mit Ebenen prüfen.
-4. Eine visuelle Auswahl und Korrektur ergänzen. Später einen optionalen Linux-/GPU-Adapter für passende Punktwolkenmodelle wie Mask3D oder Pointcept prüfen. Solche Modelle verarbeiten 3D-Punkte und gegebenenfalls Punktfarben; Kamerabilder sind dafür keine generelle Voraussetzung. Passende Klassen und Modellgewichte für Industrieanlagen müssen separat bewertet werden.
-
-Originalpunkte, Einheiten und geometrische Modelle bleiben dabei die Grundlage für eine spätere CAD-Ableitung.
+NKSR-Code und vortrainierte Gewichte haben eigene Lizenzbedingungen; siehe [Nutzung und Lizenz](docs/nksr.md#nutzung-und-lizenz).

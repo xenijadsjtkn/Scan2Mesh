@@ -1,17 +1,16 @@
-"""Desktop reconstruction retains geometry smaller than the former voxel grid."""
+"""The retained classical reference mesher preserves fine geometry."""
 
 import json
 from pathlib import Path
 
 import numpy as np
 import open3d as o3d
-import pytest
 
-from scan2mesh import desktop
+from scan2mesh.pipeline import PipelineConfig, run_pipeline
 
 
-def test_default_desktop_preserves_fine_surface_while_removing_outliers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_classical_reference_preserves_fine_surface_while_removing_outliers(
+    tmp_path: Path
 ) -> None:
     # A 30 mm sphere densely samples detail that the former 10 mm grid erased.
     indices = np.arange(1_500)
@@ -25,10 +24,8 @@ def test_default_desktop_preserves_fine_surface_while_removing_outliers(
     source = tmp_path / "fine-sphere.ply"
     cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
     assert o3d.io.write_point_cloud(str(source), cloud)
-    monkeypatch.setattr(desktop, "choose_scan_file", lambda: source)
-    monkeypatch.setattr(desktop, "RUNS_ROOT", tmp_path / "runs")
-
-    result = desktop.main([])
+    result = tmp_path / "reference-result"
+    run_pipeline(source, result, PipelineConfig())
 
     report = json.loads((result / "report.json").read_text())
     counts = report["counts"]
