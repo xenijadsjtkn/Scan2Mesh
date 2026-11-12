@@ -2,6 +2,8 @@
 
 Scan2Mesh rekonstruiert Punktwolken mit **NKSR direkt auf höchster Detailstufe**. Auf `main` verwenden Play, F5 und der Terminalstart denselben Ablauf wie der Referenzlauf `nksr-direkt-20261103-102607-9a8c5ff5`: alle Originalpunkte, Modell `ks`, `detail_level=1.0`, `mise_iter=1` und beide Meshvarianten mit und ohne interne NKSR-Maske.
 
+**Für neue Mitarbeiter mit VS Code:** Die [ausführliche Schritt-für-Schritt-Anleitung](docs/mitarbeiter-anleitung.md) führt vom Download über die Einrichtung und Interpreter-Auswahl bis zum ersten Scan, den Ergebnissen und späteren Updates. Sie beschreibt den Branch `codex/windows-setup`.
+
 ## Auf einem neuen Windows-Rechner starten
 
 Voraussetzungen sind Windows mit einer NVIDIA-GPU und einem funktionierenden NVIDIA-Windows-Treiber, Internetzugang sowie Administratorrechte für die einmalige WSL-Einrichtung. Python, Git, Ubuntu und VS Code müssen vorher nicht installiert sein.

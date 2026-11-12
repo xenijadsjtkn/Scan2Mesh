@@ -2,6 +2,8 @@
 
 `Einrichten.cmd` bereitet einen Windows-Rechner für den gemeinsamen NKSR-Direktlauf vor. Für den täglichen Start dient anschließend `Starten.cmd`. Eine Installation von Git, Python, Ubuntu oder VS Code vor dem Setup ist nicht erforderlich.
 
+Eine [ausführliche Anleitung für Mitarbeiter mit bereits installiertem VS Code](mitarbeiter-anleitung.md) beschreibt jeden Schritt einschließlich Python-Auswahl, F5/Play, erster Punktwolke und Ergebnissen im Branch `codex/windows-setup`.
+
 ## Voraussetzungen
 
 - Windows mit Unterstützung für WSL2 und aktivierbarer Hardwarevirtualisierung.
