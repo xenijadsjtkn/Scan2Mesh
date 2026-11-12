@@ -96,6 +96,33 @@ def _wsl_path(prefix: list[str], path: str | Path, *, to_windows: bool = False) 
     return converted
 
 
+def _saved_backend() -> dict:
+    """Use the successful per-user Windows setup without changing global env."""
+    if sys.platform != "win32":
+        return {}
+    local_data = os.environ.get("LOCALAPPDATA")
+    root = Path(local_data) if local_data else Path.home() / "AppData" / "Local"
+    config_path = root / "Scan2Mesh" / "backend.json"
+    if not config_path.exists():
+        return {}
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(config, dict) or type(config.get("schema_version")) is not int or config["schema_version"] != 1:
+            raise ValueError("Unsupported backend configuration")
+        for name in ("python", "wsl_distro"):
+            value = config.get(name)
+            if not isinstance(value, str) or not value.strip() or any(c in value for c in "\x00\r\n"):
+                raise ValueError(f"Missing or invalid {name}")
+        if not config["python"].startswith("/"):
+            raise ValueError("NKSR Python must be an absolute Linux path")
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"Gespeicherte NKSR-Einrichtung ungueltig: {config_path}. "
+            "Einrichten.cmd erneut ausfuehren oder Interpreter und Distribution ausdruecklich angeben."
+        ) from exc
+    return config
+
+
 def run_direct(
     source: Path, output_root: Path, *, units: str = "m",
     python: str | None = None, wsl_distro: str | None = None,
@@ -116,6 +143,10 @@ def run_direct(
         raise FileNotFoundError(f"NKSR-Direktstarter fehlt: {worker}")
     selected_python = python or os.environ.get("SCAN2MESH_NKSR_PYTHON")
     selected_distro = wsl_distro or os.environ.get("SCAN2MESH_NKSR_WSL_DISTRO")
+    if sys.platform == "win32" and (not selected_python or not selected_distro):
+        saved = _saved_backend()
+        selected_python = selected_python or saved.get("python")
+        selected_distro = selected_distro or saved.get("wsl_distro")
     use_wsl = sys.platform == "win32" or bool(selected_distro)
     prefix: list[str] = []
     if use_wsl:

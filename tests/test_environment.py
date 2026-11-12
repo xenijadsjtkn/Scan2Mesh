@@ -153,11 +153,38 @@ def test_windows_vscode_launch_and_setup_task_use_the_same_external_environment(
         )
         assert configuration["python"].replace("\\", "/") == "${workspaceFolder}/.venv/bin/python"
         task = tasks_by_label[configuration["preLaunchTask"]]
-        assert task.get("windows", {}).get("command", task["command"]) == "uv"
-        assert task.get("windows", {}).get("args", task["args"]) == ["sync", "--frozen"]
+        assert task["windows"]["command"] == "powershell.exe"
+        assert task["windows"]["args"] == [
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            "${workspaceFolder}/scripts/prepare_frontend.ps1",
+        ]
         windows_environment = dict(task.get("options", {}).get("env", {}))
         windows_environment.update(task["windows"].get("options", {}).get("env", {}))
         assert windows_environment["UV_PROJECT_ENVIRONMENT"].replace("\\", "/") == expected_environment
         assert windows_environment["UV_CACHE_DIR"].replace("\\", "/") == expected_cache
         base_environment = task.get("options", {}).get("env", {}).get("UV_PROJECT_ENVIRONMENT")
         assert base_environment in (None, "${workspaceFolder}/.venv")
+
+
+def test_play_bootstrap_reuses_managed_uv_without_global_install(tmp_path, monkeypatch):
+    launcher = load_bootstrap()
+    local_data = tmp_path / "Lokale Daten Ä"
+    uv = local_data / "Scan2Mesh" / "tools" / "uv.exe"
+    uv.parent.mkdir(parents=True)
+    uv.touch()
+    monkeypatch.setenv("LOCALAPPDATA", str(local_data))
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher.sys, "prefix", str(tmp_path / "global-python"))
+    monkeypatch.setattr(launcher.sys, "argv", ["main.py"])
+    calls = []
+
+    def run(command, **options):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    with pytest.raises(SystemExit) as result:
+        launcher.main()
+    assert result.value.code == 0
+    assert calls[0] == [str(uv), "sync", "--frozen"]
+    assert calls[1][0] == str(local_data / "Scan2Mesh" / "venv" / "Scripts" / "python.exe")

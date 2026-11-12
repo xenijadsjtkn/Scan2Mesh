@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "uv": {
+    "version": "0.12.23",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-x86_64-pc-windows-msvc.zip",
+    "sha256": "75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90"
+  },
+  "ubuntu": {
+    "release": "22.04",
+    "build": "20240304",
+    "url": "https://cloud-images.ubuntu.com/wsl/releases/22.04/20240304/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz",
+    "sha256": "de9f6149da07b90350a3ccd94b4858b82fef71f0ec2982acb93de583c4c87585"
+  },
+  "backend": {
+    "prefix": "/opt/scan2mesh",
+    "python": "/opt/scan2mesh/envs/nksr/bin/python"
+  },
+  "python": "3.10",
+  "torch": "2.7.0+cu128",
+  "cuda": "12.8",
+  "open3d": "0.19.0",
+  "miniforge": {
+    "version": "26.9.4-2",
+    "url": "https://github.com/conda-forge/miniforge/releases/download/26.9.4-2/Miniforge3-26.9.4-2-Linux-x86_64.sh",
+    "sha256": "bbaf16b3897da24c4be50315934ba74848f617b4495982841d6a0a60e0edbbdf"
+  },
+  "nksr": {
+    "repository": "https://github.com/nv-tlabs/NKSR.git",
+    "revision": "e40336845e67761343a756788e5a98b827d4a143",
+    "eigen_revision": "1ac855c25dc4aa8453c8e18e0db55336b6bdd0ba",
+    "openvdb_revision": "7edd8cd86f105a01a41ad7b2bf59a81034cd79fb"
+  },
+  "pycg": {
+    "repository": "https://github.com/heiwang1997/pycg.git",
+    "revision": "6e4b5db28c9bbb15036dfead2ae05540dd8094c8"
+  }
+}

@@ -1,6 +1,6 @@
 # NKSR-Direktlauf auf main
 
-`main.py`, Play/F5, `scan2mesh process` und `nksr-direkt.ps1` starten denselben direkten NKSR-Ablauf. Dieser ist auf `main` der Standard. Die Einstellungen entsprechen der `run.json` des Referenzlaufs `nksr-direkt-20261103-102607-9a8c5ff5`.
+`Starten.cmd`, `main.py`, Play/F5, `scan2mesh process` und `nksr-direkt.ps1` starten denselben direkten NKSR-Ablauf. Dieser ist auf `main` der Standard. Die Einstellungen entsprechen der `run.json` des Referenzlaufs `nksr-direkt-20261103-102607-9a8c5ff5`.
 
 ## Fester Ablauf
 
@@ -18,13 +18,13 @@ Es gibt keine nachträgliche Glättung, Meshvereinfachung, Dreiecksbereinigung o
 
 ## Start und Ausgabe
 
-In VS Code `main.py` öffnen und Play drücken oder die F5-Konfiguration **Scan2Mesh: NKSR direkt (Standard)** verwenden. Im Terminal reicht:
+Auf einem neuen Windows-Rechner zuerst [Einrichten.cmd ausführen](windows-setup.md), danach `Starten.cmd` doppelklicken. Im PowerShell-Terminal ist derselbe Start möglich:
 
 ```powershell
-uv run python main.py
+.\Starten.cmd
 ```
 
-Der Dateidialog öffnet sich. Alle Einstellungen oben sind bereits aktiv. Mit `--input DATEI` lässt sich der Dialog überspringen; `--units mm` deklariert Millimeterkoordinaten und `--output-root ORDNER` setzt das Ausgabe-Stammverzeichnis. Zur Wahl der vorhandenen NKSR-Installation dienen `--nksr-python` und `--nksr-wsl-distro`; siehe [Einrichtung](nksr.md).
+Der Dateidialog öffnet sich. Alle Einstellungen oben sind bereits aktiv. Optional `-InputFile DATEI`, `-Units mm` oder `-OutputRoot ORDNER` angeben. In VS Code lassen sich weiterhin `main.py` mit Play oder die F5-Konfiguration **Scan2Mesh: NKSR direkt (Standard)** verwenden. Diese Python-Starts unterstützen die entsprechenden Optionen `--input`, `--units` und `--output-root`. Zur Wahl der vorhandenen NKSR-Installation dienen `--nksr-python` und `--nksr-wsl-distro`; siehe [Einrichtung](nksr.md).
 
 Der bisherige PowerShell-Aufruf bleibt möglich und führt ebenfalls beide Exporte mit Detailstufe 1.0 aus:
 

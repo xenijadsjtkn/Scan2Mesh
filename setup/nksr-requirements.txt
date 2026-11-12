@@ -1,0 +1,31 @@
+# Curated direct dependencies for the pinned NKSR/PyCG source revisions.
+# Transitive dependencies are resolved by pip; this is not a complete lockfile.
+--extra-index-url https://download.pytorch.org/whl/cu128
+--find-links https://data.pyg.org/whl/torch-2.7.0+cu128.html
+--only-binary torch-scatter
+torch==2.7.0+cu128
+torchvision==0.22.0+cu128
+torch-scatter==2.1.2+pt27cu128
+numpy==1.26.4
+scipy==1.15.3
+open3d==0.19.0
+matplotlib==3.10.1
+omegaconf==2.3.0
+tqdm==4.67.1
+ninja==1.11.1.4
+GitPython==3.1.44
+pyntcloud==0.3.1
+plyfile==1.1.2
+pyquaternion==0.9.9
+PyYAML==6.0.2
+nvidia-ml-py==12.570.86
+calmsize==0.1.3
+rich==13.9.4
+trimesh==4.6.5
+imageio==2.37.0
+screeninfo==0.8.1
+Pillow==11.1.0
+usd-core==25.2.post1
+setuptools==75.8.0
+wheel==0.45.1
+pip==25.0.1

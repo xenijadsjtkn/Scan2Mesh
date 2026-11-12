@@ -15,6 +15,14 @@ def project_environment(root: Path) -> Path:
     return Path(root) / ".venv"
 
 
+def project_uv(root: Path) -> str:
+    if sys.platform == "win32":
+        managed = project_environment(root).parent / "tools" / "uv.exe"
+        if managed.is_file():
+            return str(managed)
+    return "uv"
+
+
 def main():
     root = Path(__file__).resolve().parent
     environment_dir = project_environment(root)
@@ -31,7 +39,7 @@ def main():
         else:
             environment.setdefault("UV_CACHE_DIR", str(root / ".cache" / "uv"))
         try:
-            subprocess.run(["uv", "sync", "--frozen"], cwd=root, env=environment, check=True)
+            subprocess.run([project_uv(root), "sync", "--frozen"], cwd=root, env=environment, check=True)
         except FileNotFoundError:
             raise SystemExit("uv fehlt. Einmal im Terminal installieren: winget install --id astral-sh.uv --exact; danach VS Code neu starten.") from None
         except subprocess.CalledProcessError as exc:

@@ -21,5 +21,7 @@ $runnerArguments = @("--units", $Units, "--output-root", $OutputRoot)
 if ($WslDistro) { $runnerArguments += @("--nksr-wsl-distro", $WslDistro) }
 if ($NksrPython) { $runnerArguments += @("--nksr-python", $NksrPython) }
 # Highest detail and both trim exports are always enabled, also without flags.
-& uv run --project $PSScriptRoot python (Join-Path $PSScriptRoot "main.py") @runnerArguments
+$uv = Join-Path $env:LOCALAPPDATA "Scan2Mesh\tools\uv.exe"
+if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { $uv = "uv" }
+& $uv run --project $PSScriptRoot python (Join-Path $PSScriptRoot "main.py") @runnerArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

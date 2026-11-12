@@ -1,8 +1,16 @@
 # NKSR-Umgebung einrichten
 
-Scan2Mesh startet den direkten NKSR-Lauf in einer **bereits eingerichteten Linux-Python-Umgebung mit PyTorch und CUDA**. Unter Windows läuft diese Umgebung in WSL2; Dateiauswahl und VS Code können unter Windows bleiben. Die normale Scan2Mesh-Umgebung wird weiterhin separat mit `uv` vorbereitet.
+Für einen neuen Windows-Rechner ist **`Einrichten.cmd`** der vorgesehene Weg. Das Setup bereitet die Windows-Werkzeuge und eine eigene Linux-/CUDA-Umgebung vor und prüft eine kleine echte NKSR-Rekonstruktion. Anschließend startet **`Starten.cmd`** denselben NKSR-Direktlauf wie Play/F5. Die Schrittfolge steht unter [Windows einrichten](windows-setup.md).
 
-Wer bereits den Referenzlauf erfolgreich ausgeführt hat, kann dieselbe NKSR-Installation weiterverwenden. Der Standardstart installiert oder verändert dort keine Pakete. [Start und Ausgaben](nksr-direct.md) beschreiben den jetzt auf `main` gemeinsamen Ablauf.
+Eine bereits funktionierende NKSR-Installation kann weiterverwendet werden. Das Setup prüft eine ausdrücklich gewählte bestehende Umgebung durch eine echte Rekonstruktion und speichert die Auswahl nur bei Erfolg. Es baut oder verändert diese persönliche Umgebung nicht neu. Die folgenden Abschnitte beschreiben die Auswahl einer solchen Installation und den manuellen Linux-Aufbau für selbst verwaltete Systeme.
+
+## Gespeicherte Backend-Auswahl
+
+Nach erfolgreichem Setup steht die Auswahl unter **`%LOCALAPPDATA%\Scan2Mesh\backend.json`**. Für die neu verwaltete Installation sind die WSL-Distribution `Scan2Mesh-NKSR` und der Interpreter `/opt/scan2mesh/envs/nksr/bin/python` eingetragen. Ein automatischer Start kann diese Datei verwenden, ohne globale Umgebungsvariablen zu setzen.
+
+Ausdrückliche Kommandozeilenoptionen haben Vorrang vor den entsprechenden Umgebungsvariablen; danach folgen die gespeicherte Konfiguration und die automatische Suche. Wer zuvor `SCAN2MESH_NKSR_PYTHON` oder `SCAN2MESH_NKSR_WSL_DISTRO` gesetzt hat, wählt damit weiterhin bewusst diese Installation vor dem gespeicherten Setup-Backend.
+
+Die normalen Programme starten die gewählte vorhandene CUDA-Umgebung und verändern dort keine Pakete. [Start und Ausgaben](nksr-direct.md) beschreiben den festen Rekonstruktionsablauf: Originalpunkte, `ks`, Detailstufe 1.0 und beide Maskenvarianten.
 
 ## Vorhandene Installation auswählen
 
@@ -12,7 +20,7 @@ Unter Windows zeigt dieser Befehl die eingerichteten WSL-Distributionen:
 wsl.exe --list --quiet
 ```
 
-Ohne weitere Einstellung verwendet Scan2Mesh **Ubuntu-22.04**. Der Starter sucht dort nach einer vorhandenen `nksr`-Umgebung unter üblichen Conda-/Mamba-Pfaden im Linux-Benutzerprofil sowie beim aufgerufenen Interpreter. Er verwendet genau einen Kandidaten, der `torch` und `nksr` importieren kann. Bei mehreren passenden Umgebungen muss der gewünschte Interpreter ausdrücklich gewählt werden.
+Wenn weder eine gespeicherte Backend-Auswahl noch ausdrückliche Einstellungen vorliegen, verwendet der ältere Suchweg **Ubuntu-22.04**. Das automatische Windows-Setup verwendet stattdessen seine gespeicherte Distribution **Scan2Mesh-NKSR**. Der Starter sucht dort nach einer vorhandenen `nksr`-Umgebung unter üblichen Conda-/Mamba-Pfaden im Linux-Benutzerprofil sowie beim aufgerufenen Interpreter. Er verwendet genau einen Kandidaten, der `torch` und `nksr` importieren kann. Bei mehreren passenden Umgebungen muss der gewünschte Interpreter ausdrücklich gewählt werden.
 
 Für einen einmaligen Start im PowerShell-Terminal des Projekts die tatsächlichen Werte einsetzen:
 
@@ -22,7 +30,7 @@ uv run python main.py --nksr-wsl-distro Ubuntu-22.04 --nksr-python /home/DEIN_LI
 
 Der Interpreterpfad muss auf eine einzelne ausführbare **Linux-Python-Datei** zeigen. Befehle wie `conda run ...` oder `wsl ...` gehören nicht in `--nksr-python`.
 
-Für eine dauerhafte Auswahl auf Benutzerebene beide Beispielwerte ersetzen:
+Das Setup kann eine ausdrücklich gewählte vorhandene Installation nach erfolgreichem Rekonstruktionstest in `backend.json` registrieren. Für eine davon unabhängige dauerhafte Auswahl auf Benutzerebene lassen sich weiterhin beide folgenden Beispielwerte ersetzen:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('SCAN2MESH_NKSR_WSL_DISTRO', 'Ubuntu-22.04', 'User')
@@ -37,9 +45,9 @@ Unter Linux ohne WSL den vorhandenen Interpreter direkt wählen:
 uv run python main.py --input scan.ply --nksr-python /vollstaendiger/pfad/zur/nksr-umgebung/bin/python
 ```
 
-## Neue NKSR-Umgebung aufbauen
+## Manueller Linux-Aufbau
 
-Die folgenden Einrichtungsschritte laufen **innerhalb von Linux beziehungsweise WSL**. Sie entsprechen dem bislang dokumentierten Build mit x86-64 Linux, Python 3.10, PyTorch 2.7.0 und CUDA 12.8. Eine Installation auf der jeweiligen Nutzerhardware muss separat geprüft werden. Siehe [offizielle Umgebung](https://github.com/nv-tlabs/NKSR/blob/public/environment.yml) und [Build-Konfiguration](https://github.com/nv-tlabs/NKSR/blob/public/package/setup.py).
+Die folgenden Einrichtungsschritte sind für selbst verwaltete Systeme und laufen **innerhalb von Linux beziehungsweise WSL**. Für neue Windows-Anwender übernimmt `Einrichten.cmd` den Aufbau mit den Versionen und Prüfsummen aus [setup/versions.json](../setup/versions.json) sowie den direkten Abhängigkeiten aus [setup/nksr-requirements.txt](../setup/nksr-requirements.txt). Diese Festlegungen sperren nicht alle transitiven Linux-Abhängigkeiten und garantieren keine bitweise identischen Builds. Sie entsprechen dem bislang dokumentierten Build mit x86-64 Linux, Python 3.10, PyTorch 2.7.0 und CUDA 12.8. Eine Installation auf der jeweiligen Nutzerhardware muss separat geprüft werden. Siehe [offizielle Umgebung](https://github.com/nv-tlabs/NKSR/blob/public/environment.yml) und [Build-Konfiguration](https://github.com/nv-tlabs/NKSR/blob/public/package/setup.py).
 
 Benötigt werden eine NVIDIA-GPU mit passendem Treiber, Conda oder Micromamba, Git, ein C++-Compiler und das CUDA-Buildwerkzeug `nvcc`. Das Linux-Arbeitsverzeichnis für den Build außerhalb synchronisierter Windows-/OneDrive-Ordner anlegen. Zuerst prüfen, ob WSL beziehungsweise Linux die GPU sieht:
 
@@ -84,7 +92,7 @@ python -m pip install "open3d==0.19.0"
 
 Der bestehende NKSR-Build kann dabei weiterverwendet werden. Scan2Mesh selbst muss nicht in dieser Python-3.10-Umgebung installiert werden; der Starter führt den Worker aus dem lokalen Repository aus. Der Direktlauf nutzt zusätzlich NumPy und SciPy zur Daten- und Farbübertragung; diese müssen in der NKSR-Umgebung importierbar sein.
 
-## Installation prüfen
+## Manuelle Installation prüfen
 
 Innerhalb der aktivierten NKSR-Umgebung:
 
@@ -94,6 +102,8 @@ git rev-parse HEAD
 ```
 
 Den ausgegebenen Python-Pfad für die Scan2Mesh-Konfiguration verwenden und die NKSR-Revision für reproduzierbare Vergleiche notieren. Der Importcheck lädt keine Modellgewichte und ersetzt keinen vollständigen Rekonstruktionstest. Der erste Rekonstruktionslauf kann den offiziellen vortrainierten `ks`-Checkpoint herunterladen; die [Modellkonfiguration](https://github.com/nv-tlabs/NKSR/blob/public/package/nksr/configs.py) nennt dessen Adresse.
+
+Beim automatischen Windows-Setup muss zusätzlich zum Import eine kleine echte CUDA-Rekonstruktion mit beiden Mesh-Exporten erfolgreich sein, bevor die neue Backend-Auswahl gespeichert wird. Dieser Installationstest verändert die späteren normalen Datenläufe nicht. Eine frische Installation auf der konkreten Windows-/GPU-Hardware ist dadurch vor Ort zu bestätigen; Entwicklungs- und Mocktests allein belegen sie nicht.
 
 Die Rekonstruktion verwendet **`cuda:0`**, die erste für PyTorch sichtbare CUDA-GPU. Der Speicherbedarf hängt von Punktzahl, Auflösung und Geometrie ab. Bei fehlendem CUDA, Importfehlern oder Speichermangel meldet Scan2Mesh den Fehler und erhält bereits geschriebene Ergebnisse. Es gibt keinen automatischen CPU-Modus, Mesherwechsel oder Detailverlust durch eine automatische Reduktion.
 
